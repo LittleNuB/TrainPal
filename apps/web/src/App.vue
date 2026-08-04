@@ -93,6 +93,10 @@ onBeforeUnmount(() => {
         <h1>本机训练数据暂时无法读取</h1>
         <p>数据没有被清除，可以重新尝试读取。</p>
         <button class="tp-primary-action" type="button" @click="bootstrap.retry">重试读取</button>
+        <div class="bootstrap-product-summary" aria-label="TrainPal 产品介绍">
+          <p>TRAINPAL 是什么</p>
+          <span>把本地健身视频转成可确认、可调整、可完成的训练。</span>
+        </div>
       </section>
     </main>
 
@@ -159,6 +163,9 @@ onBeforeUnmount(() => {
 .bootstrap-shell h1 { max-width: 390px; margin: 0; color: var(--tp-ink); font: 700 clamp(42px, 12vw, 68px)/.92 var(--font-display), var(--font-cn); }
 .bootstrap-shell p:not(.bootstrap-eyebrow) { max-width: 330px; margin: 0 auto; color: var(--tp-muted); font-size: 14px; line-height: 1.7; }
 .bootstrap-shell button { justify-self: center; margin-top: 8px; }
+.bootstrap-product-summary { display: grid; gap: 6px; max-width: 390px; margin: 8px auto 0; padding: 15px; border: 1px solid var(--tp-line); border-radius: 16px; color: var(--tp-ink); background: rgb(255 253 248 / 68%); text-align: left; }
+.bootstrap-product-summary p { margin: 0; color: var(--tp-primary-readable); font: 700 11px/1 var(--font-display); letter-spacing: .12em; }
+.bootstrap-product-summary span { color: var(--tp-muted); font-size: 12px; line-height: 1.6; }
 
 .global-task-dock {
   position: fixed;

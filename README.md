@@ -1,58 +1,79 @@
 # TrainPal
 
-> `questionaire/` 保留队友提交的 GYMTI 独立参考原型，仅用于设计与实现追溯；正式产品入口是 `apps/web` 与 `services/analysis-api`，参考原型不进入 CloudBase 源码包、容器或线上服务。
+> 把“想练但还没开始”的健身视频，变成一场可以确认、调整并完成的训练。
 
-TrainPal 是你的专属训练伙伴：把用户主动找到的健身视频转成可以确认、调整并立即执行的训练，并由同一个小猫教练在规划、训练和结果阶段持续陪伴。
+TrainPal 是一个以本地视频为入口的 Web-first 训练伙伴。用户从当前设备选择自己有权使用的健身视频；系统提取可核对的动作候选与来源片段，将它们编排为训练方案，并由同一位猫教练陪伴完成训练与回顾。
 
-TrainPal 同时是产品名、用户可见的唯一 Agent 和小猫教练身份。内部由可替换的内容理解 Provider、训练编译 Skill、个性化调整 Skill、动作要点补充 Skill 与确定性训练引擎协作；用户始终保留最终决定权。
+它不把健身内容伪装成已接入的短视频信息流，也不把模型结果当作不可质疑的答案。每一项训练都保留人的确认权。
 
-当前竞赛版以当前设备的本地视频导入为主、受控视频为可选快速体验兜底。浏览器同设备保存原视频，服务端只处理并清理临时副本；完整源文件上限为 5 分钟，部署能力仍以公共能力接口返回的真实值为准。
+## 为什么做它
 
-## 本地候选已完成的竞赛版基线
+收藏健身视频很容易，真正开始训练很难。中间缺的不是更多内容，而是把内容转成“我今天能完成什么”的桥梁。
 
-当前 Web MVP 已在本地候选串起完整的本机训练闭环：
+TrainPal 的设计重点是这条转化链路：
 
-1. 用户在独立首页选择本地视频，并在明确点击后启动真实整段分析；语音与视觉并行，TrainPal 只提出可校正候选。
-2. 跨视频选择动作，或创建没有参考视频的动作；当前方案自动保存，可排序、复制和编辑参数。
-3. 将当前方案另存为本机方案，执行次数型或时长型训练，并在休息、离页或刷新后恢复。
-4. TrainPal 以五种状态陪练，可随时隐藏；训练档案只在本机用于卡路里约值和个性策略弱参考。
-5. GYMTI v1 使用共享版本化合同完成 5–8 题测评、七猫单一推荐、明确确认／改选和同设备恢复；目标竞赛部署使用 Ark／豆包最小数据增强与独立三并发门，拥塞、失败或留存边界未确认时立即使用确定性本地选题与模板叙事。
-6. 完整或提前结束的实际完成量进入训练记录；完整训练可生成 1080×1920 PNG 海报并分享或下载。
+```text
+本地健身视频 → 动作候选与来源证据 → 可编辑训练方案 → 训练执行 → 本机记录与回顾
+```
 
-当前部署合同要求普通访客可使用五条明确标注、按时长排列的受控视频发起真实分析；同一时刻只接纳一条公开分析，不再设置会话／IP 冷却或请求次数额度，终态清理后同一会话可立即再次创建。评委体验码不再是公开真实分析的必要条件。静态“快速体验方案”仍是产品样例，不是 AI 结果或运行时 Mock 回退。该新合同尚无当前 CloudBase 候选的线上通过回执，不得把本地实现或历史版本结果表述为已上线成功。
+| 体验原则 | 产品上的体现 |
+| --- | --- |
+| 用户带来内容 | 仅选择当前设备上的本地视频；不抓取任意链接、不复用平台登录态。 |
+| AI 提供依据，不替人决定 | 动作候选保留出处，可在训练前编辑、删除或补充。 |
+| 训练不是一次性输出 | 方案、训练进度与记录在同一设备上延续。 |
+| 真实能力如实呈现 | 后端不可用时，首页仍展示完整产品路径；不会假装分析已经完成。 |
 
-主要页面：`/` 首页与导入、`/analysis` 分析任务、`/plan` 方案编辑、`/personalize` 个性化、`/train` 训练中心、`/training` 训练执行、`/result/:recordId` 结果与海报、`/mine` 我的。开发环境另提供静态 Fixture 设计画廊 `/__design/trainpal` 和七猫动画预览台 `/__design/trainpal/pets`，生产构建不注册这两个路由。
+## 体验地图
 
-## 技术栈
+1. **选择视频**：导入一条自己有权使用的健身视频，先预览、再明确点击分析。
+2. **理解动作**：分析任务展示真实阶段、进度、覆盖缺口和可恢复状态；失败不会被说成“没有识别到动作”。
+3. **确认方案**：按动作顺序组织训练，可调整参数、顺序或添加不依赖视频的动作。
+4. **进入训练**：次数型与时长型动作都可执行；离开页面或刷新后可在同一设备继续。
+5. **完成回顾**：实际完成量进入训练记录，并可生成分享海报。
 
-- `apps/web`：Vue 3、TypeScript、Vite、Pinia、Dexie
-- `services/analysis-api`：Python 3.12、FastAPI、Pydantic、httpx
-- `skills`：训练编译、个性化调整、动作要点补充的版本化领域能力
+## 当前可展示的内容
 
-## 本地启动
+- **作品集首页**：静态产品叙事、三步体验路径与隐私／确认边界始终可见，不依赖 API 返回内容。
+- **本地视频入口**：支持 MP4、MOV、WebM；视频由浏览器在当前设备保存，服务端只使用临时分析副本。
+- **动作分析流程**：显式启动、可取消、可恢复；分析的完整来源时长以能力接口实际返回值为准。
+- **训练工作流**：方案编辑、个性化问卷、训练计时、猫教练状态、结果与海报。
+- **受控演示来源**：部署可配置少量授权视频，用于快速体验真实分析；它们不是模拟结果。
 
-前置环境：Node 24、pnpm 11、Python 3.12、uv。
+> **展示边界**：这是一个正在演进的竞赛／作品集原型。云端分析需要自行配置服务；没有配置时，产品不会伪造 AI 分析成功或部署可用性。
+
+## 技术架构
+
+| 层 | 主要技术 | 责任 |
+| --- | --- | --- |
+| Web | Vue 3 · TypeScript · Vite · Pinia · Dexie | 训练旅程、同设备数据、媒体选择、方案与训练 UI |
+| API | Python 3.12 · FastAPI · Pydantic · httpx | 运行管理、媒体临时处理、来源证据与分析 Provider 编排 |
+| 领域能力 | 版本化 contracts 与 skills | 训练编译、个性化调整、动作要点补充 |
+
+核心产品数据优先保存在浏览器的当前设备。用户选择的源视频不进入仓库；后端收到的音视频、帧、转写和模型返回属于一次运行的临时数据，应在运行结束后清理。
+
+## 本地运行
+
+### 环境要求
+
+- Node.js 24.x
+- pnpm 11.x
+- Python 3.12
+- [uv](https://docs.astral.sh/uv/)
+
+### 启动
 
 ```powershell
+git clone https://github.com/<your-github-account>/Hachimi.git
+Set-Location Hachimi
 pnpm install
 uv sync --project services/analysis-api
 Copy-Item .env.example .env.local
 pnpm dev
 ```
 
-`.env.local` 只由后端读取且必须保持 Git 忽略。`HAKIMI_DEMO_VIDEO_PATH` 只配置受控快速体验；用户本地视频由浏览器主动选择，不通过环境变量或服务器路径导入。竞赛部署使用版本化来源清单和只读媒体缓存，视频不会复制进仓库。
+打开 `http://localhost:5173`。`.env.local` 只由后端读取，必须保持在 Git 忽略列表中；不要将任何密钥、令牌、Cookie 或真实用户视频提交到仓库。
 
-七猫运行资源已经是 WebP。需要从设计交付包重新生成时，使用项目内 Sharp 脚本；`<raw-pets-directory>` 应直接包含 `hotblood`、`gentle` 等七个目录：
-
-```powershell
-pnpm --filter @hachimi/web pets:build -- --source <raw-pets-directory>
-```
-
-脚本只转码清单中的 168 个动画 PNG，不复制 `fullbody.png`，也不把原始 PNG 放入运行目录。
-
-测试 Provider 仅允许 `APP_ENV=test`，不能作为开发或生产回退。真实云配置缺失时，后端会明确失败。
-
-竞赛生产计划显式启用 Ark／豆包 GYMTI 模型增强；调用只发送版本化稳定 ID、服务端派生信号和已经成立的结构化结果，使用独立三并发门且不消耗真实视频分析额度。第四条并发、模型错误或供应商留存边界未确认时立即走本地降级。问卷原型 `questionaire/` 只作追溯参考，不参与根工作区测试、源码包、容器或线上服务；正式事实源为 `contracts/gymti-questionnaire.v1.json`。
+默认配置中的本地视频限制与 Provider 可用性仅是开发起点。运行时以公共能力接口的返回结果为准。
 
 ## 验证
 
@@ -62,25 +83,32 @@ pnpm test:e2e
 pnpm api:generate
 ```
 
-`pnpm test:e2e` 使用独立 loopback 端口、合成媒体和测试专用适配器，不复用本机已启动的开发服务。真实 Ark + 豆包流式语音识别 2.0 联调需在本地显式运行 `pnpm smoke:cloud`；CI 不注入云密钥。
+- `pnpm check`：Web lint、类型检查、API 静态检查、单元测试与生产构建。
+- `pnpm test:e2e`：使用独立 loopback 端口、合成媒体和测试专用适配器，不复用正在运行的本地服务。
+- `pnpm smoke:cloud`：仅在本地显式配置真实云端能力后使用；CI 不注入云端密钥。
 
-## 文档
+## 目录导览
 
-- [当前原型状态与下一步（团队同步版）](docs/team/project-status-and-next-steps.md)
+```text
+apps/web/                  Vue 前端与产品体验
+services/analysis-api/     FastAPI 分析服务
+contracts/                 版本化接口与问卷合同
+skills/                    训练编译、个性化与动作要点领域能力
+docs/design/               体验与视觉设计说明
+docs/adr/                  架构决策记录
+```
+
+`questionaire/` 是队友提交的独立参考原型，只用于设计与实现追溯；正式产品入口为 `apps/web` 与 `services/analysis-api`，参考原型不进入线上源码包或服务。
+
+## 设计与产品文档
+
+- [移动端体验 Brief](docs/design/trainpal-mobile-experience-brief.md)
+- [竞赛 Web MVP 规格](docs/specs/competition-web-mvp.md)
 - [领域词汇表](CONTEXT.md)
-- [当前竞赛 Web 产品规格](docs/specs/competition-web-mvp.md)
-- [冻结的移动体验 Brief](docs/design/trainpal-mobile-experience-brief.md)
-- [历史本地视频训练原型规格](docs/specs/local-video-training-prototype.md)
-- [本地视频优先与可恢复覆盖分析 ADR](docs/adr/0013-local-video-import-and-recoverable-analysis.md)
+- [本地视频导入与可恢复分析 ADR](docs/adr/0013-local-video-import-and-recoverable-analysis.md)
 - [GYMTI 主应用确认边界 ADR](docs/adr/0031-questionnaire-recommends-main-app-confirms-coach-style.md)
-- [GYMTI 共享版本化合同 ADR](docs/adr/0040-gymti-uses-one-versioned-json-contract.md)
-- [公开分析单并发且无会话／IP 冷却 ADR](docs/adr/0045-public-analysis-keeps-one-slot-without-session-or-ip-cooldown.md)
-- [GYMTI Ark／豆包最小数据与独立并发 ADR](docs/adr/0044-gymti-uses-ark-doubao-minimal-data-and-independent-concurrency.md)
-- [Web 体验规范历史入口](docs/design/web-experience-guidelines.md)
-- [完整 Web 架构](docs/technical/web-mvp-architecture.md)
-- [训练场次、本地媒体与本地数据合同](docs/technical/training-session-contract.md)
-- [竞赛部署与演示 Runbook](docs/release/competition-runbook.md)
-- [架构决策](docs/adr)
-- [历史原始项目方案](docs/source/哈基米练臂力动%20-%20抖音内置健身小程序项目方案.md)
+- [公开分析并发策略 ADR](docs/adr/0045-public-analysis-keeps-one-slot-without-session-or-ip-cooldown.md)
 
-`zhiyin` 与 `try-it` 已暂时搁置，原目录保持不变。
+## License
+
+[MIT](LICENSE) © 2026 Hachimi Contributors

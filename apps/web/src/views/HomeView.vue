@@ -195,6 +195,11 @@ onMounted(initialize)
       </div>
       <h1 class="tp-title">刷到的动作，<br>变成今天的训练。</h1>
       <p class="tp-lead">选择一条你想练的视频。TrainPal 会拆出动作、保留原片段，再把它整理成可以直接开始的训练。</p>
+      <ul class="hero-signals" aria-label="TrainPal 核心特点">
+        <li>本地视频优先</li>
+        <li>动作可校正</li>
+        <li>同设备继续训练</li>
+      </ul>
     </header>
 
     <section class="import-workspace" aria-labelledby="import-title">
@@ -257,6 +262,59 @@ onMounted(initialize)
       >
         重新读取分析能力
       </button>
+    </section>
+
+    <section class="product-story" aria-labelledby="product-story-title">
+      <div class="story-heading">
+        <p class="tp-kicker">FROM VIDEO TO MOVEMENT</p>
+        <h2 id="product-story-title">不是看完一条视频，<br>而是完成一次训练。</h2>
+        <p>TrainPal 把“收藏了但没练”的内容，变成一条由你确认、调整和完成的训练路径。无论接口是否可用，这条产品路径都清楚可见。</p>
+      </div>
+
+      <ol class="journey-board">
+        <li>
+          <span>01</span>
+          <div>
+            <strong>带来你的参考</strong>
+            <p>从当前设备选择自己有权使用的健身视频；不读取平台 Cookie，也不抓取任意链接。</p>
+          </div>
+        </li>
+        <li>
+          <span>02</span>
+          <div>
+            <strong>理解动作与出处</strong>
+            <p>分析结果保留可回看的来源片段。它是候选与证据，不是不可修改的黑箱答案。</p>
+          </div>
+        </li>
+        <li>
+          <span>03</span>
+          <div>
+            <strong>进入你的训练节奏</strong>
+            <p>确认方案后，在训练、休息和结果回顾中由同一位猫教练持续陪伴。</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section class="portfolio-proof" aria-labelledby="portfolio-proof-title">
+      <div class="proof-copy">
+        <p class="tp-kicker">DESIGNED FOR TRUST</p>
+        <h2 id="portfolio-proof-title">每个关键判断，<br>都留给训练的人。</h2>
+      </div>
+      <dl class="proof-grid">
+        <div>
+          <dt>来源</dt>
+          <dd>本地设备保留原视频，服务端只处理临时副本。</dd>
+        </div>
+        <div>
+          <dt>结果</dt>
+          <dd>动作、组数和时长都可以在开始训练前确认与调整。</dd>
+        </div>
+        <div>
+          <dt>连续性</dt>
+          <dd>方案和训练进度保存在当前设备，可在离开后继续。</dd>
+        </div>
+      </dl>
     </section>
 
     <section
@@ -346,6 +404,8 @@ onMounted(initialize)
 .brand-stamp { display: grid; width: 42px; height: 42px; place-items: center; border: 2px solid var(--tp-ink); border-radius: 50%; color: var(--tp-surface); background: var(--tp-ink); font: 700 15px/1 var(--font-display); letter-spacing: .08em; }
 .home-hero .tp-title { max-width: 650px; }
 .home-hero .tp-lead { max-width: 590px; }
+.hero-signals { display: flex; flex-wrap: wrap; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.hero-signals li { padding: 7px 10px; border: 1px solid var(--tp-line); border-radius: 999px; color: var(--tp-muted); background: rgb(255 253 248 / 64%); font-size: 11px; font-weight: 800; }
 
 .import-workspace { display: grid; gap: 14px; }
 .workspace-heading { display: flex; align-items: end; gap: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--tp-line); }
@@ -377,6 +437,26 @@ onMounted(initialize)
 .start-analysis span { margin-left: auto; font-size: 20px; }
 .retry-capability { justify-self: center; }
 
+.product-story { display: grid; gap: 20px; padding: 24px; border: 1px solid var(--tp-ink); border-radius: var(--tp-radius-lg); color: var(--tp-training-ink); background: var(--tp-ink); box-shadow: var(--tp-shadow-float); }
+.story-heading { display: grid; gap: 11px; }
+.story-heading .tp-kicker { color: var(--tp-secondary); }
+.story-heading h2,
+.proof-copy h2 { margin: 0; font: 700 clamp(32px, 8vw, 48px)/.96 var(--font-display), var(--font-cn); letter-spacing: -.02em; }
+.story-heading > p:last-child { max-width: 590px; margin: 0; color: #D4D9D3; font-size: 13px; line-height: 1.7; }
+.journey-board { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; border-top: 1px solid rgb(247 243 233 / 20%); }
+.journey-board li { display: grid; grid-template-columns: 42px 1fr; gap: 12px; padding: 15px 0; border-bottom: 1px solid rgb(247 243 233 / 20%); }
+.journey-board li > span { color: var(--tp-secondary); font: 700 22px/1 var(--font-display); }
+.journey-board li > div { display: grid; gap: 5px; }
+.journey-board strong { color: var(--tp-training-ink); font-size: 14px; }
+.journey-board p { margin: 0; color: #BAC3BB; font-size: 12px; line-height: 1.6; }
+
+.portfolio-proof { display: grid; gap: 20px; padding: 2px 0 6px; }
+.proof-copy { display: grid; gap: 10px; }
+.proof-grid { display: grid; gap: 9px; margin: 0; }
+.proof-grid div { min-height: 114px; padding: 16px; border: 1px solid var(--tp-line); border-radius: 18px; background: rgb(255 253 248 / 72%); }
+.proof-grid dt { margin-bottom: 22px; color: var(--tp-primary-readable); font: 700 12px/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; }
+.proof-grid dd { margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.65; }
+
 .quick-real-section { display: grid; gap: 13px; padding-top: 4px; }
 .quick-real-section > p { margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.6; }
 .quick-real-sources { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
@@ -404,6 +484,8 @@ onMounted(initialize)
   .home-page { gap: 42px; }
   .ticket-copy { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
   .quick-real-sources { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .product-story { padding: 32px; }
+  .proof-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -57,6 +57,9 @@ describe('TrainPal 首页', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('刷到的动作')
+    expect(wrapper.text()).toContain('不是看完一条视频')
+    expect(wrapper.text()).toContain('带来你的参考')
+    expect(wrapper.text()).toContain('每个关键判断')
     expect(wrapper.text()).toContain('最长 1 分钟')
     expect(wrapper.text()).toContain('结果需要核对')
     expect(wrapper.text()).toContain('建议不超过 19 MB')

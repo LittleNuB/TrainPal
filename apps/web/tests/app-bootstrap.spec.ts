@@ -114,6 +114,7 @@ describe('应用本机数据启动壳', () => {
     })
 
     expect(wrapper.get('[role="alert"]').text()).toContain('本机训练数据暂时无法读取')
+    expect(wrapper.text()).toContain('把本地健身视频转成可确认、可调整、可完成的训练')
     expect(wrapper.text()).not.toContain('indexeddb unavailable')
 
     await wrapper.get('button').trigger('click')
