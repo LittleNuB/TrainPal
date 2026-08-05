@@ -16,6 +16,10 @@
   · <a href="#验证">验证</a>
 </p>
 
+<p align="center">
+  <img src="docs/readme/trainpal-home.png" width="100%" alt="TrainPal 首页，从本地健身视频开始一场训练">
+</p>
+
 TrainPal 会检查整段视频，整理动作和对应时间，再把有疑问的地方留给人确认。用户可以改动作、顺序和参数，随后带着同一位小猫教练完成训练。
 
 | 先看完整来源 | 再确认训练内容 | 最后记录真实结果 |
@@ -33,6 +37,19 @@ TrainPal 会检查整段视频，整理动作和对应时间，再把有疑问�
   <strong>开始训练</strong> →
   <strong>保存记录</strong>
 </p>
+
+<table>
+  <tr>
+    <td width="50%" align="center"><img src="docs/readme/trainpal-plan.png" alt="TrainPal 训练方案编辑页"></td>
+    <td width="50%" align="center"><img src="docs/readme/trainpal-training.png" alt="TrainPal 训练执行页"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>确认动作，调整组次、时长、休息与顺序</sub></td>
+    <td align="center"><sub>按组完成训练，只记录实际完成量</sub></td>
+  </tr>
+</table>
+
+<p align="center"><sub>方案与训练画面使用仓库内置快速体验方案，只用于演示训练流程，不作为 AI 分析结果，也不包含真实用户数据。</sub></p>
 
 公开仓库已经串起完整 Web 应用、分析服务、训练流程与验证合同。运行真实云端分析仍需要自行配置 Provider。服务不可用时，浏览与训练路径会保留，界面也会说明本次分析没有完成。
 
