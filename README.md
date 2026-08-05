@@ -25,14 +25,14 @@ TrainPal 会检查整段视频，整理动作和对应时间，再把有疑问�
 
 ## 从视频到训练
 
-```mermaid
-flowchart LR
-    A[选择本地视频] --> B[查看分析进度与覆盖]
-    B --> C[确认带来源时间的动作]
-    C --> D[编辑训练方案]
-    D --> E[开始训练]
-    E --> F[保存实际完成结果]
-```
+<p align="center">
+  <strong>选择本地视频</strong> →
+  <strong>查看分析覆盖</strong> →
+  <strong>确认动作</strong> →
+  <strong>编辑方案</strong> →
+  <strong>开始训练</strong> →
+  <strong>保存记录</strong>
+</p>
 
 公开仓库已经串起完整 Web 应用、分析服务、训练流程与验证合同。运行真实云端分析仍需要自行配置 Provider。服务不可用时，浏览与训练路径会保留，界面也会说明本次分析没有完成。
 
