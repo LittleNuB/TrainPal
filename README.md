@@ -101,8 +101,8 @@ TrainPal 不提供疼痛诊断、伤病康复、负重处方或实时姿态判�
 需要 Node.js 24、pnpm 11、Python 3.12 和 [uv](https://docs.astral.sh/uv/)。
 
 ```powershell
-git clone https://github.com/LittleNuB/Hachimi.git
-Set-Location Hachimi
+git clone https://github.com/LittleNuB/TrainPal.git
+Set-Location TrainPal
 pnpm install
 uv sync --project services/analysis-api
 Copy-Item .env.example .env.local

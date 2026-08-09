@@ -112,7 +112,7 @@
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues for `happyJumpup/Hachimi`. See
+Issues and PRDs are tracked in GitHub Issues for `LittleNuB/TrainPal`. See
 `docs/agents/issue-tracker.md`.
 
 ### Triage labels
