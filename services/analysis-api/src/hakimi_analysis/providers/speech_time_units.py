@@ -11,6 +11,7 @@ _AFFIRMATIVE_PREFIX = (
     r"(?:(?:训练|练)后)?(?:可|可以)?(?:再)?(?:加|做|进行)?\s*"
     r"|晚可以加\s*"
 )
+_REST_CONTEXT = re.compile(r"休息|间歇|组间|\brest\b", re.IGNORECASE)
 
 
 def reconcile_speech_time_units(
@@ -41,6 +42,7 @@ def reconcile_speech_time_units(
             signal.duration_seconds is not None
             and signal.reps is None
             and signal.rest_seconds is None
+            and not _REST_CONTEXT.search(text)
         ):
             action = re.escape(signal.action_name)
             minute_statement = re.fullmatch(

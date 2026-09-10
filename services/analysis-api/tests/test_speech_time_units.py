@@ -15,33 +15,36 @@ from hakimi_analysis.providers.ark import ArkResponsesClient
 @respx.mock
 @pytest.mark.parametrize("timestamp_case", ["contained", "other_action", "straddles", "missing"])
 @pytest.mark.parametrize(
-    ("text", "duration", "expected"),
+    ("text", "duration", "expected", "action_name"),
     [
-        ("训练后可加20分钟爬坡有氧", 20, 1200),
-        ("晚可以加20分钟爬坡有氧。", 20, 1200),
-        ("晚可以加最多20分钟爬坡有氧。", 20, 20),
-        ("晚不可以加20分钟爬坡有氧。", 20, 20),
-        ("训练后可加20分钟爬坡有氧", 1200, 1200),
-        ("训练后可加20秒爬坡有氧", 20, 20),
-        ("训练后可加20分钟爬坡有氧", None, None),
-        ("先休息20分钟", 20, 20),
-        ("做15到20分钟爬坡有氧", 20, 20),
-        ("做20分钟有氧，休息30秒", 20, 20),
-        ("不要做20分钟有氧", 20, 20),
-        ("做1小时20分钟有氧", 20, 20),
-        ("20分钟后开始有氧", 20, 20),
-        ("这段视频长20分钟", 20, 20),
-        ("先做20分钟跑步，再做爬坡有氧", 20, 20),
-        ("爬坡有氧，跑步20分钟", 20, 20),
-        ("最多20分钟爬坡有氧", 20, 20),
-        ("接近20分钟爬坡有氧", 20, 20),
-        ("爬坡有氧20分钟半", 20, 20),
-        ("爬坡有氧20分钟上下", 20, 20),
-        ("反向爬坡有氧20分钟", 20, 20),
+        ("训练后可加20分钟爬坡有氧", 20, 1200, "爬坡有氧"),
+        ("晚可以加20分钟爬坡有氧。", 20, 1200, "爬坡有氧"),
+        ("晚可以加最多20分钟爬坡有氧。", 20, 20, "爬坡有氧"),
+        ("晚不可以加20分钟爬坡有氧。", 20, 20, "爬坡有氧"),
+        ("训练后可加20分钟爬坡有氧", 1200, 1200, "爬坡有氧"),
+        ("训练后可加20秒爬坡有氧", 20, 20, "爬坡有氧"),
+        ("训练后可加20分钟爬坡有氧", None, None, "爬坡有氧"),
+        ("先休息20分钟", 20, 20, "爬坡有氧"),
+        ("做15到20分钟爬坡有氧", 20, 20, "爬坡有氧"),
+        ("做20分钟有氧，休息30秒", 20, 20, "爬坡有氧"),
+        ("不要做20分钟有氧", 20, 20, "爬坡有氧"),
+        ("做1小时20分钟有氧", 20, 20, "爬坡有氧"),
+        ("20分钟后开始有氧", 20, 20, "爬坡有氧"),
+        ("这段视频长20分钟", 20, 20, "爬坡有氧"),
+        ("先做20分钟跑步，再做爬坡有氧", 20, 20, "爬坡有氧"),
+        ("爬坡有氧，跑步20分钟", 20, 20, "爬坡有氧"),
+        ("最多20分钟爬坡有氧", 20, 20, "爬坡有氧"),
+        ("接近20分钟爬坡有氧", 20, 20, "爬坡有氧"),
+        ("爬坡有氧20分钟半", 20, 20, "爬坡有氧"),
+        ("爬坡有氧20分钟上下", 20, 20, "爬坡有氧"),
+        ("反向爬坡有氧20分钟", 20, 20, "爬坡有氧"),
+        ("做20分钟休息", 20, 20, "休息"),
+        ("做20分钟组间间歇", 20, 20, "组间间歇"),
+        ("做20分钟Rest", 20, 20, "Rest"),
     ],
 )
 async def test_speech_duration_repairs_only_an_unambiguous_dropped_minute_unit(
-    text: str, duration: int | None, expected: int | None, timestamp_case: str
+    text: str, duration: int | None, expected: int | None, action_name: str, timestamp_case: str
 ) -> None:
     timestamp_cases: dict[str, dict[str, float]] = {
         "contained": {"start_seconds": 60.58, "end_seconds": 62.06},
@@ -58,7 +61,7 @@ async def test_speech_duration_repairs_only_an_unambiguous_dropped_minute_unit(
                     {
                         "signals": [
                             {
-                                "action_name": "爬坡有氧",
+                                "action_name": action_name,
                                 "duration_seconds": duration,
                                 "start_seconds": 60.58,
                                 "end_seconds": 62.06,
