@@ -11,7 +11,7 @@ _AFFIRMATIVE_PREFIX = (
     r"(?:(?:训练|练)后)?(?:可|可以)?(?:再)?(?:加|做|进行)?\s*"
     r"|晚可以加\s*"
 )
-_REST_CONTEXT = re.compile(r"休息|间歇|组间|\brest\b", re.IGNORECASE)
+_REST_CONTEXT = re.compile(r"休息|间歇|组间|(?<![a-z])rest(?![a-z])", re.IGNORECASE)
 
 
 def reconcile_speech_time_units(
