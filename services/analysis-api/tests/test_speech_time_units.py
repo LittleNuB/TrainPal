@@ -1,4 +1,4 @@
-"""Semantic reproductions, not retained historical Provider responses."""
+"""Constructed responses with semantic cases and one observed short ASR phrase."""
 
 import json
 
@@ -13,10 +13,14 @@ from hakimi_analysis.providers.ark import ArkResponsesClient
 
 @pytest.mark.asyncio
 @respx.mock
+@pytest.mark.parametrize("timestamp_case", ["contained", "other_action", "straddles", "missing"])
 @pytest.mark.parametrize(
     ("text", "duration", "expected"),
     [
         ("训练后可加20分钟爬坡有氧", 20, 1200),
+        ("晚可以加20分钟爬坡有氧。", 20, 1200),
+        ("晚可以加最多20分钟爬坡有氧。", 20, 20),
+        ("晚不可以加20分钟爬坡有氧。", 20, 20),
         ("训练后可加20分钟爬坡有氧", 1200, 1200),
         ("训练后可加20秒爬坡有氧", 20, 20),
         ("训练后可加20分钟爬坡有氧", None, None),
@@ -29,11 +33,23 @@ from hakimi_analysis.providers.ark import ArkResponsesClient
         ("这段视频长20分钟", 20, 20),
         ("先做20分钟跑步，再做爬坡有氧", 20, 20),
         ("爬坡有氧，跑步20分钟", 20, 20),
+        ("最多20分钟爬坡有氧", 20, 20),
+        ("接近20分钟爬坡有氧", 20, 20),
+        ("爬坡有氧20分钟半", 20, 20),
+        ("爬坡有氧20分钟上下", 20, 20),
+        ("反向爬坡有氧20分钟", 20, 20),
     ],
 )
 async def test_speech_duration_repairs_only_an_unambiguous_dropped_minute_unit(
-    text: str, duration: int | None, expected: int | None
+    text: str, duration: int | None, expected: int | None, timestamp_case: str
 ) -> None:
+    timestamp_cases: dict[str, dict[str, float]] = {
+        "contained": {"start_seconds": 60.58, "end_seconds": 62.06},
+        "other_action": {"start_seconds": 10, "end_seconds": 12},
+        "straddles": {"start_seconds": 59, "end_seconds": 63},
+        "missing": {},
+    }
+    timestamps = timestamp_cases[timestamp_case]
     respx.post("https://ark.example/api/v3/responses").mock(
         return_value=httpx.Response(
             200,
@@ -68,8 +84,7 @@ async def test_speech_duration_repairs_only_an_unambiguous_dropped_minute_unit(
                 "utterances": [
                     {
                         "text": text,
-                        "start_seconds": 60.58,
-                        "end_seconds": 62.06,
+                        **timestamps,
                     }
                 ],
             },
@@ -77,10 +92,11 @@ async def test_speech_duration_repairs_only_an_unambiguous_dropped_minute_unit(
             instructions="Extract only explicit training parameters in seconds.",
         )
 
-    assert result.signals[0].duration_seconds == expected
+    expected_value = expected if timestamp_case == "contained" else duration
+    assert result.signals[0].duration_seconds == expected_value
     candidates = fuse_candidates(
         source_id="unit-review",
         speech_signals=result.signals,
         visual_segments=[],
     )
-    assert candidates[0].parameters.duration_seconds == expected
+    assert candidates[0].parameters.duration_seconds == expected_value
