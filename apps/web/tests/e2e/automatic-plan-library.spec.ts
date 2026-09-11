@@ -1,4 +1,22 @@
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
+
+for (const width of [320, 1440]) {
+  test(`populated plan library remains usable at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/train')
+    await page.getByRole('button', { name: '使用快速体验方案' }).click()
+    await page.getByRole('link', { name: '返回首页', exact: true }).click()
+    await page.locator('a[href="/train"]').click()
+    await expect(page.locator('.saved-row')).toHaveCount(1)
+    await expect(page.getByRole('button', { name: '新建方案', exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    const accessibility = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()
+    expect(accessibility.violations).toEqual([])
+    await page.screenshot({ path: testInfo.outputPath('plan-library.png'), fullPage: true })
+  })
+}
 
 test('a recognized legacy sample keeps its label after renaming and copying', async ({ page }) => {
   await page.goto('/train')

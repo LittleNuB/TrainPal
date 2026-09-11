@@ -115,6 +115,7 @@ const trainAgain = async (): Promise<void> => {
   pending.value = true
   feedback.value = ''
   try {
+    await draft.flushPersist()
     await draft.quiescePersistence()
     draft.adoptPersistedPlan(await library.replaceCurrentDraft({
       name: current.plan.name,

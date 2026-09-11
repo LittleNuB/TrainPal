@@ -72,11 +72,12 @@ const makeSession = (record: TrainingRecord): TrainingSession => ({
   updatedAt: '2026-07-21T00:01:00.000Z',
 })
 
-const setup = async (options: { failReplacement?: boolean } = {}) => {
+const setup = async (options: { failReplacement?: boolean; failSave?: boolean } = {}) => {
   const pinia = createPinia()
   setActivePinia(pinia)
   const record = makeRecord()
   const replacementCalls: Array<Pick<DraftPlan, 'name' | 'items'>> = []
+  const savedDrafts: DraftPlan[] = []
   const repository: LibraryRepository = {
     listPlans: async () => [],
     listRecords: async () => [record],
@@ -101,7 +102,13 @@ const setup = async (options: { failReplacement?: boolean } = {}) => {
     clearAllLocalData: async () => undefined,
   }
   await useLibraryStore().load(repository)
-  await useDraftStore().load({ load: async () => undefined, save: async () => undefined })
+  await useDraftStore().load({
+    load: async () => undefined,
+    save: async (plan) => {
+      if (options.failSave) throw new Error('storage details must not leak')
+      savedDrafts.push(structuredClone(plan))
+    },
+  })
 
   const router = createRouter({
     history: createMemoryHistory(),
@@ -117,7 +124,7 @@ const setup = async (options: { failReplacement?: boolean } = {}) => {
   await router.isReady()
   const wrapper = mount(ResultView, { global: { plugins: [pinia, router] } })
   await flushPromises()
-  return { record, replacementCalls, router, wrapper }
+  return { record, replacementCalls, savedDrafts, router, wrapper }
 }
 
 describe('训练结果', () => {
@@ -198,6 +205,33 @@ describe('训练结果', () => {
     expect(draft.plan.name).toBe(context.record.plan.name)
     expect(draft.items).toEqual(context.record.plan.items)
     expect(context.router.currentRoute.value.path).toBe('/plan')
+  })
+
+  it('saves pending edits before restoring a past training plan', async () => {
+    const context = await setup()
+    useDraftStore().addManualAction({ name: '必须保留的新动作', mode: 'reps' })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    await context.wrapper.get('footer button').trigger('click')
+    await flushPromises()
+
+    expect(context.savedDrafts.at(-1)?.items[0]?.name).toBe('必须保留的新动作')
+    expect(context.replacementCalls).toHaveLength(1)
+  })
+
+  it('does not replace the current plan when saving pending edits fails', async () => {
+    const context = await setup({ failSave: true })
+    useDraftStore().addManualAction({ name: '必须保留的新动作', mode: 'reps' })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    await context.wrapper.get('footer button').trigger('click')
+    await flushPromises()
+
+    expect(context.replacementCalls).toHaveLength(0)
+    expect(useDraftStore().items[0]?.name).toBe('必须保留的新动作')
+    expect(context.router.currentRoute.value.path).toBe('/result/record-1')
+    expect(context.wrapper.get('[role="status"]').text()).toContain('没有恢复成功')
+    expect(context.wrapper.text()).not.toContain('storage details')
   })
 
   it('keeps the user on the result and hides storage details when replacement fails', async () => {
