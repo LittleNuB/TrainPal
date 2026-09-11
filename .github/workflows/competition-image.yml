@@ -58,4 +58,3 @@ jobs:
           install -m 0600 /dev/null /opt/hachimi/shared/.env.production
           rendered="$(docker compose --file deploy/compose.yml config --no-env-resolution --format json)"
           jq --exit-status '.services.app.stop_grace_period == "4m0s"' <<<"$rendered"
-
