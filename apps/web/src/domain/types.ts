@@ -1,4 +1,5 @@
 import type { components } from '@/api/schema'
+import type { DraftPersonalizationState } from '@/domain/personalization'
 
 export type ActionMode = components['schemas']['ActionMode']
 export type ValueSource = 'video' | 'rule' | 'personalized' | 'user'
@@ -147,6 +148,8 @@ export interface DraftPlan {
   name: string
   linkedPlanId: string | null
   items: DraftItem[]
+  revision?: number
+  personalization?: DraftPersonalizationState
   updatedAt: string
 }
 

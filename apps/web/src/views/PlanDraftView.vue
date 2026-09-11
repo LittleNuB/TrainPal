@@ -5,11 +5,13 @@ import { useRouter } from 'vue-router'
 import { useDialogFocus } from '@/composables/useDialogFocus'
 import { fingerprintMatches, probeVideoDuration, SUPPORTED_LOCAL_MEDIA_TYPES } from '@/domain/local-media'
 import { estimatePlanMinutes } from '@/domain/plan'
+import type { AdjustableField, AdjustmentIntent, AdjustmentReasonCode } from '@/domain/personalization'
 import { toSafeOriginUrl } from '@/domain/source'
 import type { ActionMode, DraftItem } from '@/domain/types'
 import CoachMotion from '@/features/experience/CoachMotion.vue'
 import { QUICK_EXPERIENCE_PLAN_NAME } from '@/features/quick-experience/fixture'
 import { useDraftStore } from '@/stores/draft'
+import { useGymtiStore } from '@/stores/gymti'
 import { useLibraryStore } from '@/stores/library'
 import { useLocalMediaStore } from '@/stores/local-media'
 import { useTrainingStore } from '@/stores/training'
@@ -21,6 +23,7 @@ type OperationError = {
 
 const router = useRouter()
 const draft = useDraftStore()
+const gymti = useGymtiStore()
 const library = useLibraryStore()
 const localMedia = useLocalMediaStore()
 const training = useTrainingStore()
@@ -43,11 +46,22 @@ const previewUrl = ref<string | null>(null)
 const previewError = ref('')
 const confirmingItem = ref(false)
 const actionSheet = ref<HTMLElement | null>(null)
+const adjustmentDialog = ref<HTMLElement | null>(null)
+const adjustmentOpen = ref(false)
+const adjustmentIntent = ref<AdjustmentIntent | null>(null)
+const adjustmentSafetyStop = ref(false)
+const adjustmentError = ref('')
+const adjustmentNotice = ref('')
 const {
   activate: activateActionSheet,
   deactivate: deactivateActionSheet,
   onKeydown: onActionSheetKeydown,
 } = useDialogFocus(actionSheet)
+const {
+  activate: activateAdjustmentDialog,
+  deactivate: deactivateAdjustmentDialog,
+  onKeydown: onAdjustmentDialogKeydown,
+} = useDialogFocus(adjustmentDialog)
 let previewGeneration = 0
 
 const confirmedItems = computed(() =>
@@ -58,6 +72,15 @@ const totalSets = computed(() =>
   confirmedItems.value.reduce((sum, item) => sum + (item.sets.value ?? 0), 0),
 )
 const estimatedMinutes = computed(() => estimatePlanMinutes(confirmedItems.value))
+const personalizationContextRevision = computed(() => Math.max(
+  Date.parse(gymti.current?.updatedAt ?? new Date(0).toISOString()),
+  Date.parse(library.profile.updatedAt),
+  Date.parse(library.preferences.updatedAt),
+))
+const adjustmentContextStale = computed(() => Boolean(
+  draft.adjustmentProposal
+  && draft.adjustmentProposal.contextRevision !== personalizationContextRevision.value,
+))
 
 const isQuickExperience = computed(() =>
   draft.plan.linkedPlanId === null && draft.plan.name === QUICK_EXPERIENCE_PLAN_NAME,
@@ -102,6 +125,111 @@ const provenance = (source: string | null): string => {
 const actionTarget = (item: DraftItem): string => {
   if (item.mode === 'duration') return `${item.durationSeconds.value ?? '—'} 秒`
   return `${item.reps.value ?? '—'} 次`
+}
+
+const fieldCopy: Record<AdjustableField, { label: string; unit: string }> = {
+  sets: { label: '组数', unit: '组' },
+  reps: { label: '每组次数', unit: '次' },
+  durationSeconds: { label: '每组时长', unit: '秒' },
+  restSeconds: { label: '休息时间', unit: '秒' },
+}
+
+const reasonCopy: Record<AdjustmentReasonCode, string> = {
+  reduce_to_finish: '降低这次开始和完成的压力',
+  increase_after_too_easy: '参考了这项动作最近“太轻”的反馈',
+  increase_for_challenge: '按你的选择，小幅增加训练量',
+  shorten_time_budget: '优先缩短这次训练的预计用时',
+  extend_recovery: '增加恢复时间，不通过压缩休息提高密度',
+}
+
+const changeValue = (field: AdjustableField, value: number): string => (
+  `${value} ${fieldCopy[field].unit}`
+)
+
+const openAdjustment = async (event: Event): Promise<void> => {
+  adjustmentIntent.value = draft.adjustmentProposal?.intent ?? null
+  adjustmentError.value = ''
+  adjustmentNotice.value = ''
+  adjustmentSafetyStop.value = false
+  adjustmentOpen.value = true
+  await activateAdjustmentDialog(event.currentTarget as HTMLElement)
+}
+
+const closeAdjustment = async (): Promise<void> => {
+  adjustmentOpen.value = false
+  adjustmentError.value = ''
+  await deactivateAdjustmentDialog()
+}
+
+const generateAdjustment = (): void => {
+  if (!adjustmentIntent.value) {
+    adjustmentError.value = '先选择这次想调整的方向。'
+    return
+  }
+  adjustmentError.value = ''
+  adjustmentNotice.value = ''
+  const proposal = draft.proposeAdjustment({
+    contextRevision: personalizationContextRevision.value,
+    intent: adjustmentIntent.value,
+    trainingExperience: null,
+    signals: [],
+    hasSafetyStopSignal: adjustmentSafetyStop.value,
+    generatedAt: new Date().toISOString(),
+  })
+  if (proposal.status === 'no_change') {
+    adjustmentNotice.value = adjustmentSafetyStop.value
+      ? '有不适时不会生成调整；请停止训练，并在需要时寻求专业帮助。'
+      : '这份方案暂时没有合适的调整，你可以照常训练或自己修改。'
+  }
+}
+
+const toggleAdjustmentSafetyStop = (): void => {
+  adjustmentSafetyStop.value = !adjustmentSafetyStop.value
+  if (adjustmentSafetyStop.value) {
+    draft.discardAdjustmentProposal()
+    adjustmentNotice.value = '有不适时不会生成调整；请停止训练，并在需要时寻求专业帮助。'
+  } else {
+    adjustmentNotice.value = ''
+  }
+}
+
+const applyAdjustment = async (): Promise<void> => {
+  const proposal = draft.adjustmentProposal
+  if (adjustmentSafetyStop.value) {
+    draft.discardAdjustmentProposal()
+    adjustmentError.value = '有不适时不能应用调整；请停止训练。'
+    return
+  }
+  if (!proposal) {
+    adjustmentError.value = '方案已修改，请重新查看调整建议。'
+    return
+  }
+  const result = await draft.applyAdjustmentProposal(proposal.id)
+  if (result === 'conflict') {
+    adjustmentError.value = '方案已修改，请重新查看调整建议。'
+    return
+  }
+  if (result === 'persist_failed') {
+    adjustmentError.value = '调整没有保存成功，原方案保持不变。请重试。'
+    return
+  }
+  adjustmentNotice.value = '已应用到当前方案。'
+  await closeAdjustment()
+}
+
+const restoreBasePlan = async (): Promise<void> => {
+  const result = await draft.restoreBasePlan()
+  if (result.status === 'persist_failed') {
+    adjustmentNotice.value = '基础方案没有保存成功，当前调整保持不变。请重试。'
+    return
+  }
+  adjustmentNotice.value = result.status === 'restored'
+    ? '已恢复调整前的安排，你之后的手动修改已保留。'
+    : '没有可恢复的 TrainPal 调整；你的手动修改保持不变。'
+}
+
+const handleAdjustmentKeydown = (event: KeyboardEvent): void => {
+  onAdjustmentDialogKeydown(event, () => { void closeAdjustment() })
 }
 
 const openEditor = async (itemId: string, trigger?: Event): Promise<void> => {
@@ -338,11 +466,29 @@ const retryOperation = async (): Promise<void> => {
       <div v-if="!library.preferences.coachStyleId" class="coach-mark" aria-hidden="true">TP</div>
       <div>
         <p class="tp-kicker">TRAINPAL COACH</p>
-        <h2 id="coach-card-title">需要更贴近你的目标？</h2>
-        <p>GYMTI 会给出一个教练风格推荐；明确确认前不展示小猫，基础方案仍可直接训练。</p>
+        <h2 id="coach-card-title">
+          {{ draft.appliedAdjustment ? '已为本次训练调整' : '需要更贴近你现在的状态？' }}
+        </h2>
+        <p v-if="draft.appliedAdjustment">调整只改变了组数、次数或时长、休息；你的手动修改仍然优先。</p>
+        <p v-else>想轻松一点，还是增加挑战？先看看建议，满意再调整。</p>
       </div>
-      <RouterLink to="/personalize">让 TrainPal 调整这次训练</RouterLink>
+      <div class="coach-actions">
+        <button type="button" data-adjustment-trigger @click="openAdjustment">
+          {{ draft.appliedAdjustment ? '重新调整' : '让 TrainPal 调整这次训练' }}
+        </button>
+        <button
+          v-if="draft.appliedAdjustment"
+          type="button"
+          data-restore-base-plan
+          @click="restoreBasePlan"
+        >
+          恢复基础方案
+        </button>
+        <RouterLink to="/personalize">GYMTI 与教练风格</RouterLink>
+      </div>
     </section>
+
+    <p v-if="adjustmentNotice" class="adjustment-notice" role="status">{{ adjustmentNotice }}</p>
 
     <section v-if="draft.items.length" class="plan-list" aria-label="动作安排">
       <article
@@ -609,6 +755,99 @@ const retryOperation = async (): Promise<void> => {
         </footer>
       </section>
     </template>
+
+    <template v-if="adjustmentOpen">
+      <button class="sheet-backdrop" type="button" aria-label="关闭训练调整" @click="closeAdjustment" />
+      <section
+        ref="adjustmentDialog"
+        class="action-sheet adjustment-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="adjustment-dialog-title"
+        tabindex="-1"
+        @keydown="handleAdjustmentKeydown"
+      >
+        <header>
+          <div>
+            <p class="tp-kicker">TRAINPAL</p>
+            <h2 id="adjustment-dialog-title">调整这次训练</h2>
+          </div>
+          <button type="button" aria-label="关闭训练调整" @click="closeAdjustment">×</button>
+        </header>
+
+        <p class="user-priority-note">视频里的明确要求、你的手动修改和重量都保持不变。</p>
+
+        <button
+          type="button"
+          class="adjustment-safety-stop"
+          data-adjustment-safety-stop
+          :aria-pressed="adjustmentSafetyStop"
+          @click="toggleAdjustmentSafetyStop"
+        >
+          <span aria-hidden="true">{{ adjustmentSafetyStop ? '✓' : '○' }}</span>
+          我现在有疼痛、眩晕或其他需要停止训练的不适
+        </button>
+
+        <div class="adjustment-intents" aria-label="选择调整方向">
+          <button
+            type="button"
+            data-dialog-initial-focus
+            data-adjustment-intent="easier_to_finish"
+            :class="{ active: adjustmentIntent === 'easier_to_finish' }"
+            @click="adjustmentIntent = 'easier_to_finish'"
+          >
+            <strong>更容易完成</strong><span>适度降低次数或时长，必要时增加休息</span>
+          </button>
+          <button
+            type="button"
+            data-adjustment-intent="more_challenging"
+            :class="{ active: adjustmentIntent === 'more_challenging' }"
+            @click="adjustmentIntent = 'more_challenging'"
+          >
+            <strong>更有挑战</strong><span>小幅增加次数或时长，不压缩休息</span>
+          </button>
+          <button
+            type="button"
+            data-adjustment-intent="shorter_session"
+            :class="{ active: adjustmentIntent === 'shorter_session' }"
+            @click="adjustmentIntent = 'shorter_session'"
+          >
+            <strong>时间更短</strong><span>小幅减少训练量，不缩短休息</span>
+          </button>
+        </div>
+
+        <button type="button" class="generate-adjustment" data-generate-adjustment @click="generateAdjustment">
+          看看调整建议
+        </button>
+
+        <p v-if="adjustmentError" class="inline-error" role="alert">{{ adjustmentError }}</p>
+        <p v-if="adjustmentNotice" class="adjustment-dialog-notice" role="status">{{ adjustmentNotice }}</p>
+        <p v-if="adjustmentContextStale" class="context-stale-note" role="status">
+          TrainPal 对你的了解已经更新；可以应用这份提案，也可以按当前信息重新生成。
+        </p>
+
+        <section v-if="draft.adjustmentProposal?.status === 'ready'" class="adjustment-change-list" aria-label="调整差异">
+          <article v-for="change in draft.adjustmentProposal.changes" :key="`${change.itemId}-${change.field}`">
+            <div><strong>{{ change.itemName }}</strong><span>{{ fieldCopy[change.field].label }}</span></div>
+            <b>{{ changeValue(change.field, change.before.value) }} → {{ changeValue(change.field, change.after.value) }}</b>
+            <p>{{ reasonCopy[change.reasonCode] }}</p>
+          </article>
+        </section>
+
+        <footer class="sheet-actions">
+          <button type="button" @click="closeAdjustment">稍后再说</button>
+          <button
+            v-if="draft.adjustmentProposal?.status === 'ready'"
+            type="button"
+            class="done"
+            data-apply-adjustment
+            @click="applyAdjustment"
+          >
+            应用这次调整
+          </button>
+        </footer>
+      </section>
+    </template>
   </main>
 </template>
 
@@ -637,7 +876,11 @@ const retryOperation = async (): Promise<void> => {
 .coach-mark { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 18px 18px 18px 5px; color: var(--tp-ink); background: var(--tp-secondary); font: 800 18px/1 var(--font-display); transform: rotate(-2deg); }
 .coach-card h2 { margin: 5px 0 4px; font-size: 20px; }
 .coach-card p:not(.tp-kicker) { margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.6; }
-.coach-card a { grid-column: 2; justify-self: start; min-height: 44px; padding: 12px 0 0; color: var(--tp-primary-readable); font-size: 13px; font-weight: 800; text-decoration: none; }
+.coach-actions { display: flex; grid-column: 2; flex-wrap: wrap; align-items: center; gap: 5px 12px; }
+.coach-actions button,
+.coach-actions a { min-height: 44px; padding: 0; border: 0; color: var(--tp-primary-readable); background: transparent; font-size: 12px; font-weight: 800; text-decoration: none; }
+.coach-actions a { display: grid; place-items: center; }
+.adjustment-notice { margin: 10px 0 0; color: var(--tp-success); font-size: 12px; line-height: 1.6; }
 
 .plan-list { display: grid; gap: 10px; margin-top: 22px; }
 .plan-card { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; overflow: hidden; border: 1px solid var(--tp-line); border-radius: 18px; background: var(--tp-surface); box-shadow: 0 8px 28px rgb(42 51 45 / 6%); }
@@ -754,10 +997,31 @@ const retryOperation = async (): Promise<void> => {
 .sheet-actions button { min-height: 46px; padding: 0 16px; border: 1px solid var(--tp-line); border-radius: 999px; color: var(--tp-muted); background: transparent; }
 .sheet-actions .danger { color: var(--tp-danger); }
 .sheet-actions .done { margin-left: auto; color: var(--tp-surface); border-color: var(--tp-ink); background: var(--tp-ink); font-weight: 800; }
+.adjustment-intents { display: grid; gap: 8px; }
+.adjustment-safety-stop { display: flex; min-height: 48px; align-items: center; gap: 9px; padding: 10px 12px; border: 1px solid #DDBD85; border-radius: 13px; color: #72501B; background: #FFF7E8; text-align: left; }
+.adjustment-safety-stop[aria-pressed="true"] { color: var(--tp-surface); border-color: var(--tp-danger); background: var(--tp-danger); }
+.adjustment-intents button { display: grid; min-height: 68px; gap: 4px; padding: 13px 15px; border: 1px solid var(--tp-line); border-radius: 15px; color: var(--tp-ink); background: #F7F3EA; text-align: left; }
+.adjustment-intents button.active { color: var(--tp-surface); border-color: var(--tp-ink); background: var(--tp-ink); }
+.adjustment-intents strong,
+.adjustment-intents span { display: block; }
+.adjustment-intents span { color: var(--tp-muted); font-size: 11px; line-height: 1.45; }
+.adjustment-intents button.active span { color: #D4D9D3; }
+.generate-adjustment { min-height: 48px; border: 1px solid var(--tp-primary); border-radius: 999px; color: var(--tp-surface); background: var(--tp-primary-readable); font-weight: 800; }
+.adjustment-change-list { display: grid; gap: 8px; }
+.adjustment-change-list article { display: grid; gap: 7px; padding: 13px; border: 1px solid var(--tp-line); border-radius: 14px; background: #F7F3EA; }
+.adjustment-change-list article > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.adjustment-change-list article span,
+.adjustment-change-list article p { color: var(--tp-muted); font-size: 11px; }
+.adjustment-change-list article b { color: var(--tp-primary-readable); font: 700 18px/1 var(--font-display), var(--font-cn); }
+.adjustment-change-list article p,
+.adjustment-dialog-notice { margin: 0; line-height: 1.55; }
+.adjustment-dialog-notice { color: var(--tp-success); font-size: 12px; }
+.context-stale-note { margin: 0; padding: 10px 12px; border-left: 3px solid #9A6A1D; color: #72501B; background: #FFF7E8; font-size: 11px; line-height: 1.55; }
+.inline-error { margin: 0; color: var(--tp-danger); font-size: 12px; }
 
 @media (min-width: 760px) {
   .coach-card { grid-template-columns: auto 1fr auto; align-items: center; }
-  .coach-card a { grid-column: 3; grid-row: 1; padding: 0; }
+  .coach-actions { grid-column: 3; grid-row: 1; justify-content: end; }
   .action-sheet { top: 0; right: 0; bottom: 0; left: auto; width: min(520px, 100%); max-height: none; border-radius: 28px 0 0 28px; }
 }
 

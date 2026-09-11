@@ -298,4 +298,93 @@ describe('方案草稿 store', () => {
     expect(repository.saveCount).toBe(1)
     expect(store.persistState).toBe('saved')
   })
+
+  it('persists, applies, and restores a fresh adjustment proposal without overriding user edits', async () => {
+    const repository = new MemoryDraftRepository()
+    const store = useDraftStore()
+    await store.load(repository)
+    store.applyCandidateProposal([candidate('video-a'), candidate('video-b')], {}, 'replace')
+
+    const proposal = store.proposeAdjustment({
+      contextRevision: 8,
+      intent: 'more_challenging',
+      trainingExperience: 'intermediate',
+      signals: [],
+      hasSafetyStopSignal: false,
+      generatedAt: '2026-08-24T02:00:00.000Z',
+    })
+    expect(proposal.status).toBe('ready')
+    expect(store.adjustmentProposal?.id).toBe(proposal.id)
+    await vi.advanceTimersByTimeAsync(301)
+    expect(repository.value?.personalization?.proposal?.id).toBe(proposal.id)
+
+    expect(await store.applyAdjustmentProposal(proposal.id)).toBe('applied')
+    expect(store.items.map((item) => item.reps)).toEqual([
+      { value: 12, source: 'personalized' },
+      { value: 12, source: 'personalized' },
+    ])
+
+    store.updateValue(store.items[0]!.id, 'reps', 14)
+    expect(await store.restoreBasePlan()).toEqual({ status: 'restored', count: 1 })
+    expect(store.items.map((item) => item.reps)).toEqual([
+      { value: 14, source: 'user' },
+      { value: 10, source: 'rule' },
+    ])
+  })
+
+  it('reuses an identical saved proposal and invalidates it when the plan changes', async () => {
+    const store = useDraftStore()
+    await store.load(new MemoryDraftRepository())
+    store.addManualAction({ name: '深蹲', mode: 'reps' })
+    const input = {
+      contextRevision: 9,
+      intent: 'more_challenging' as const,
+      trainingExperience: 'intermediate' as const,
+      signals: [],
+      hasSafetyStopSignal: false,
+    }
+    const first = store.proposeAdjustment({
+      ...input,
+      generatedAt: '2026-08-24T02:10:00.000Z',
+    })
+    const repeated = store.proposeAdjustment({
+      ...input,
+      generatedAt: '2026-08-24T02:20:00.000Z',
+    })
+
+    expect(repeated).toEqual(first)
+    const safetyStop = store.proposeAdjustment({
+      ...input,
+      hasSafetyStopSignal: true,
+      generatedAt: '2026-08-24T02:25:00.000Z',
+    })
+    expect(safetyStop.id).not.toBe(first.id)
+    expect(safetyStop).toMatchObject({ status: 'no_change', changes: [] })
+    store.updatePlanName('已经变化的方案')
+    expect(store.adjustmentProposal).toBeNull()
+    expect(await store.applyAdjustmentProposal(first.id)).toBe('conflict')
+  })
+
+  it('rolls back an adjustment when its immediate persistence fails', async () => {
+    const repository = new RecoverableDraftRepository()
+    repository.failSave = false
+    const store = useDraftStore()
+    await store.load(repository)
+    store.addManualAction({ name: '深蹲', mode: 'reps' })
+    const proposal = store.proposeAdjustment({
+      contextRevision: 10,
+      intent: 'more_challenging',
+      trainingExperience: 'intermediate',
+      signals: [],
+      hasSafetyStopSignal: false,
+      generatedAt: '2026-08-24T02:30:00.000Z',
+    })
+    await store.flushPersist()
+    repository.failSave = true
+
+    expect(await store.applyAdjustmentProposal(proposal.id)).toBe('persist_failed')
+    expect(store.items[0]!.reps).toEqual({ value: 10, source: 'rule' })
+    expect(store.adjustmentProposal?.id).toBe(proposal.id)
+    expect(store.persistState).toBe('failed')
+  })
 })
