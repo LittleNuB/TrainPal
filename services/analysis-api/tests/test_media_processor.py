@@ -2,6 +2,7 @@ import asyncio
 import subprocess
 import sys
 import threading
+import time
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -308,9 +309,15 @@ async def test_visual_window_starts_at_requested_non_keyframe_content(tmp_path: 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "termination_delays",
+    [(0, 0), (0.15, 0), (0, 0.15)],
+    ids=["immediate", "slow-video-stop", "slow-audio-stop"],
+)
 async def test_prepared_media_and_ffmpeg_are_stopped_when_cancelled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    termination_delays: tuple[float, float],
 ) -> None:
     source = tmp_path / "source.mp4"
     source.write_bytes(b"source")
@@ -324,6 +331,15 @@ async def test_prepared_media_and_ffmpeg_are_stopped_when_cancelled(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
         )
+        real_kill = process.kill
+        # Exercise different OS process-stop speeds without changing the media processor.
+        delay = termination_delays[len(processes)]
+
+        def delayed_kill() -> None:
+            time.sleep(delay)
+            real_kill()
+
+        monkeypatch.setattr(process, "kill", delayed_kill)
         processes.append(process)
         if len(processes) == 2:
             both_started.set()

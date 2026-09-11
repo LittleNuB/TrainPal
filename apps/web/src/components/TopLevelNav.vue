@@ -55,7 +55,7 @@ const items = [
 }
 
 .top-level-nav small {
-  color: #9A9E98;
+  color: var(--tp-muted);
   font: 700 11px/1 var(--font-display);
   letter-spacing: .08em;
 }
