@@ -25,6 +25,8 @@ const webOrigin = `http://127.0.0.1:${webPort}`
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false,
+  // E2E files share the product's single global analysis slot in one API process.
+  workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? 'github' : 'list',
