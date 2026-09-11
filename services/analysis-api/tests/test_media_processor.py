@@ -384,9 +384,11 @@ async def test_prepared_media_and_ffmpeg_are_stopped_when_cancelled(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("termination", ["cancel", "timeout"])
 async def test_cleanup_probe_stays_dirty_when_ffmpeg_cannot_be_stopped(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    termination: str,
 ) -> None:
     source = tmp_path / "source.mp4"
     source.write_bytes(b"source")
@@ -439,6 +441,7 @@ async def test_cleanup_probe_stays_dirty_when_ffmpeg_cannot_be_stopped(
     processor = LocalMediaProcessor(
         temp_root=temp_root,
         runtime_cleanup=runtime_cleanup,
+        command_timeout_seconds=0.05 if termination == "timeout" else 60,
     )
 
     async def prepare() -> None:
@@ -450,9 +453,13 @@ async def test_cleanup_probe_stays_dirty_when_ffmpeg_cannot_be_stopped(
 
     task = asyncio.create_task(prepare())
     assert await asyncio.to_thread(both_started.wait, 1)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    if termination == "cancel":
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        with pytest.raises(MediaProcessingError, match="extraction cleanup failed"):
+            await task
 
     assert len(processes) == 2
     snapshot = runtime_cleanup.snapshot()
@@ -461,9 +468,15 @@ async def test_cleanup_probe_stays_dirty_when_ffmpeg_cannot_be_stopped(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "termination_delays",
+    [(0.0, 0.0), (0.2, 0.05), (0.05, 0.2)],
+    ids=["immediate", "slow-video-stop", "slow-audio-stop"],
+)
 async def test_command_timeout_stops_ffmpeg_and_removes_prepared_media(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    termination_delays: tuple[float, float],
 ) -> None:
     source = tmp_path / "source.mp4"
     source.write_bytes(b"source")
@@ -476,12 +489,27 @@ async def test_command_timeout_stops_ffmpeg_and_removes_prepared_media(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
         )
+        real_kill = process.kill
+        delay = termination_delays[len(processes)]
+
+        def delayed_kill() -> None:
+            time.sleep(delay)
+            real_kill()
+
+        monkeypatch.setattr(process, "kill", delayed_kill)
         processes.append(process)
         return process
 
+    monkeypatch.setattr(imageio_ffmpeg, "get_ffmpeg_exe", lambda: sys.executable)
     monkeypatch.setattr(subprocess, "Popen", create_blocking_process)
+    temp_root = tmp_path / "runs"
+    runtime_cleanup = RuntimeCleanupMonitor(
+        temp_root,
+        descendant_ffmpeg_probe=lambda: set(),
+    )
     processor = LocalMediaProcessor(
-        temp_root=tmp_path / "runs",
+        temp_root=temp_root,
+        runtime_cleanup=runtime_cleanup,
         command_timeout_seconds=0.05,
     )
 
@@ -494,7 +522,8 @@ async def test_command_timeout_stops_ffmpeg_and_removes_prepared_media(
 
     assert len(processes) == 2
     assert all(process.returncode is not None for process in processes)
-    assert not any((tmp_path / "runs").iterdir())
+    assert not any(temp_root.iterdir())
+    assert runtime_cleanup.snapshot().clean is True
 
 
 @pytest.mark.asyncio
