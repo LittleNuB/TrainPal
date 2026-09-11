@@ -68,6 +68,7 @@ export interface DraftPersonalizationState {
 
 export type ApplyAdjustmentResult = 'applied' | 'conflict' | 'persist_failed'
 export type RestoreAdjustmentResult =
+  | { status: 'busy' }
   | { status: 'restored'; count: number }
   | { status: 'nothing_to_restore' }
   | { status: 'persist_failed' }

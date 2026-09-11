@@ -59,6 +59,8 @@ const planFingerprint = (plan: DraftPlan): string => hashValue({
     items: plan.items.map((item) => ({
       id: item.id,
       name: item.name,
+      sourceRef: item.sourceRef,
+      segment: item.segment,
       confirmationStatus: item.confirmationStatus ?? 'confirmed',
       mode: item.mode,
       sets: item.sets,
@@ -88,6 +90,12 @@ const latestFeedback = (
   .filter((signal) => signal.itemId === itemId)
   .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))[0]?.value
 
+const loadBounds = (mode: DraftItem['mode'], value: number): AdjustmentChange['policyBounds'] => (
+  mode === 'duration'
+    ? { minimum: 10, maximum: 90, maximumDelta: Math.min(10, Math.floor(value * 0.2 / 5) * 5) }
+    : { minimum: 5, maximum: 20, maximumDelta: Math.min(2, Math.floor(value * 0.2)) }
+)
+
 const challengingChange = (
   item: DraftItem,
   feedback: AdjustmentSignal['value'] | undefined,
@@ -97,12 +105,8 @@ const challengingChange = (
   const target = item.mode === 'duration' ? item.durationSeconds : item.reps
   const field: AdjustableField = item.mode === 'duration' ? 'durationSeconds' : 'reps'
   if (!eligible(target.value, target.source)) return null
-  const maximum = item.mode === 'duration' ? 90 : 20
-  const minimum = item.mode === 'duration' ? 10 : 5
+  const { minimum, maximum, maximumDelta } = loadBounds(item.mode, target.value)
   if (target.value < minimum || target.value > maximum) return null
-  const maximumDelta = item.mode === 'duration'
-    ? Math.min(10, Math.floor(target.value * 0.2 / 5) * 5)
-    : Math.min(2, Math.floor(target.value * 0.2))
   const nextValue = Math.min(maximum, target.value + maximumDelta)
   if (nextValue === target.value) return null
   return {
@@ -128,12 +132,8 @@ const easierChanges = (
   const target = item.mode === 'duration' ? item.durationSeconds : item.reps
   const field: AdjustableField = item.mode === 'duration' ? 'durationSeconds' : 'reps'
   if (eligible(target.value, target.source)) {
-    const minimum = item.mode === 'duration' ? 10 : 5
-    const maximum = item.mode === 'duration' ? 90 : 20
+    const { minimum, maximum, maximumDelta } = loadBounds(item.mode, target.value)
     if (target.value < minimum || target.value > maximum) return []
-    const maximumDelta = item.mode === 'duration'
-      ? Math.min(10, Math.floor(target.value * 0.2 / 5) * 5)
-      : Math.min(2, Math.floor(target.value * 0.2))
     const nextValue = Math.max(minimum, target.value - maximumDelta)
     if (nextValue !== target.value) {
       changes.push({
@@ -208,12 +208,8 @@ const shorteningCandidates = (item: DraftItem): AdjustmentChange[] => {
   const target = item.mode === 'duration' ? item.durationSeconds : item.reps
   const field: AdjustableField = item.mode === 'duration' ? 'durationSeconds' : 'reps'
   if (eligible(target.value, target.source)) {
-    const minimum = item.mode === 'duration' ? 10 : 5
-    const maximum = item.mode === 'duration' ? 90 : 20
+    const { minimum, maximum, maximumDelta } = loadBounds(item.mode, target.value)
     if (target.value < minimum || target.value > maximum) return candidates
-    const maximumDelta = item.mode === 'duration'
-      ? Math.min(10, Math.floor(target.value * 0.2 / 5) * 5)
-      : Math.min(2, Math.floor(target.value * 0.2))
     const nextValue = Math.max(minimum, target.value - maximumDelta)
     if (nextValue !== target.value) {
       candidates.push({

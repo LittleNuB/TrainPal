@@ -161,6 +161,13 @@ const closeAdjustment = async (): Promise<void> => {
   await deactivateAdjustmentDialog()
 }
 
+const selectAdjustmentIntent = (intent: AdjustmentIntent): void => {
+  if (intent !== adjustmentIntent.value) draft.discardAdjustmentProposal()
+  adjustmentIntent.value = intent
+  adjustmentError.value = ''
+  adjustmentNotice.value = ''
+}
+
 const generateAdjustment = (): void => {
   if (!adjustmentIntent.value) {
     adjustmentError.value = '先选择这次想调整的方向。'
@@ -210,7 +217,7 @@ const applyAdjustment = async (): Promise<void> => {
     return
   }
   if (result === 'persist_failed') {
-    adjustmentError.value = '调整没有保存成功，原方案保持不变。请重试。'
+    adjustmentError.value = '这次调整未保存成功，你的手动修改已保留。请重试。'
     return
   }
   adjustmentNotice.value = '已应用到当前方案。'
@@ -219,8 +226,12 @@ const applyAdjustment = async (): Promise<void> => {
 
 const restoreBasePlan = async (): Promise<void> => {
   const result = await draft.restoreBasePlan()
+  if (result.status === 'busy') {
+    adjustmentNotice.value = '正在保存，请稍后再试。'
+    return
+  }
   if (result.status === 'persist_failed') {
-    adjustmentNotice.value = '基础方案没有保存成功，当前调整保持不变。请重试。'
+    adjustmentNotice.value = '恢复未保存成功，你的手动修改已保留。请重试。'
     return
   }
   adjustmentNotice.value = result.status === 'restored'
@@ -473,13 +484,14 @@ const retryOperation = async (): Promise<void> => {
         <p v-else>想轻松一点，还是增加挑战？先看看建议，满意再调整。</p>
       </div>
       <div class="coach-actions">
-        <button type="button" data-adjustment-trigger @click="openAdjustment">
+        <button type="button" data-adjustment-trigger :disabled="draft.adjustmentPending" @click="openAdjustment">
           {{ draft.appliedAdjustment ? '重新调整' : '让 TrainPal 调整这次训练' }}
         </button>
         <button
           v-if="draft.appliedAdjustment"
           type="button"
           data-restore-base-plan
+          :disabled="draft.adjustmentPending"
           @click="restoreBasePlan"
         >
           恢复基础方案
@@ -794,7 +806,8 @@ const retryOperation = async (): Promise<void> => {
             data-dialog-initial-focus
             data-adjustment-intent="easier_to_finish"
             :class="{ active: adjustmentIntent === 'easier_to_finish' }"
-            @click="adjustmentIntent = 'easier_to_finish'"
+            :aria-pressed="adjustmentIntent === 'easier_to_finish'"
+            @click="selectAdjustmentIntent('easier_to_finish')"
           >
             <strong>更容易完成</strong><span>适度降低次数或时长，必要时增加休息</span>
           </button>
@@ -802,7 +815,8 @@ const retryOperation = async (): Promise<void> => {
             type="button"
             data-adjustment-intent="more_challenging"
             :class="{ active: adjustmentIntent === 'more_challenging' }"
-            @click="adjustmentIntent = 'more_challenging'"
+            :aria-pressed="adjustmentIntent === 'more_challenging'"
+            @click="selectAdjustmentIntent('more_challenging')"
           >
             <strong>更有挑战</strong><span>小幅增加次数或时长，不压缩休息</span>
           </button>
@@ -810,13 +824,14 @@ const retryOperation = async (): Promise<void> => {
             type="button"
             data-adjustment-intent="shorter_session"
             :class="{ active: adjustmentIntent === 'shorter_session' }"
-            @click="adjustmentIntent = 'shorter_session'"
+            :aria-pressed="adjustmentIntent === 'shorter_session'"
+            @click="selectAdjustmentIntent('shorter_session')"
           >
             <strong>时间更短</strong><span>小幅减少训练量，不缩短休息</span>
           </button>
         </div>
 
-        <button type="button" class="generate-adjustment" data-generate-adjustment @click="generateAdjustment">
+        <button type="button" class="generate-adjustment" data-generate-adjustment :disabled="draft.adjustmentPending" @click="generateAdjustment">
           看看调整建议
         </button>
 
@@ -841,6 +856,7 @@ const retryOperation = async (): Promise<void> => {
             type="button"
             class="done"
             data-apply-adjustment
+            :disabled="draft.adjustmentPending"
             @click="applyAdjustment"
           >
             应用这次调整

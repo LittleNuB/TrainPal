@@ -44,7 +44,7 @@ for (const width of [320, 390] as const) {
     await page.goto('/train')
     await page.getByRole('button', { name: '使用快速体验方案' }).click()
 
-    await expect(page.getByText(/明确确认前不展示小猫/)).toBeVisible()
+    await expect(page.getByRole('link', { name: 'GYMTI 与教练风格' })).toBeVisible()
     await expect(page.locator('.trainpal-coach')).toHaveCount(0)
     await page.getByRole('button', { name: '开始训练' }).click()
 

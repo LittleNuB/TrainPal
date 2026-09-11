@@ -583,6 +583,11 @@ describe('方案草稿保存状态', () => {
     await flushPromises()
 
     expect(wrapper.get('.adjustment-change-list').text()).toContain('10 次 → 12 次')
+    await wrapper.get('button[data-adjustment-intent="easier_to_finish"]').trigger('click')
+    expect(wrapper.find('button[data-apply-adjustment]').exists()).toBe(false)
+    expect(wrapper.find('.adjustment-change-list').exists()).toBe(false)
+    await wrapper.get('button[data-adjustment-intent="more_challenging"]').trigger('click')
+    await wrapper.get('button[data-generate-adjustment]').trigger('click')
     await wrapper.get('button[data-adjustment-safety-stop]').trigger('click')
     expect(wrapper.find('button[data-apply-adjustment]').exists()).toBe(false)
     expect(draft.adjustmentProposal).toBeNull()

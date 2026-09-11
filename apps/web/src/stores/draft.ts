@@ -123,10 +123,12 @@ export const useDraftStore = defineStore('draft', () => {
   const plan = ref<DraftPlan>(emptyPlan())
   const loaded = ref(false)
   const persistState = ref<PersistState>('idle')
+  const adjustmentPending = ref(false)
   let repository: DraftRepository | undefined
   let persistTimer: ReturnType<typeof setTimeout> | undefined
   let persistInFlight: Promise<void> | null = null
   let persistenceSuspended = false
+  let adjustmentSettled: Promise<void> | null = null
 
   const items = computed(() => plan.value.items)
   const adjustmentProposal = computed(() => plan.value.personalization?.proposal ?? null)
@@ -177,26 +179,37 @@ export const useDraftStore = defineStore('draft', () => {
   }
 
   async function flushPersist(): Promise<void> {
+    while (adjustmentSettled) await adjustmentSettled
+    await persistCurrentPlan()
+  }
+
+  async function persistCurrentPlan(expectedPlan?: DraftPlan): Promise<boolean> {
     if (!repository || persistenceSuspended) {
-      return
+      return false
     }
     if (persistTimer) {
       clearTimeout(persistTimer)
       persistTimer = undefined
     }
-    if (persistInFlight) {
+    while (persistInFlight) {
       await persistInFlight.catch(() => undefined)
-      if (persistenceSuspended) return
+      if (persistenceSuspended) return false
     }
+    if (expectedPlan && plan.value !== expectedPlan) return false
     persistState.value = 'saving'
     plan.value.updatedAt = new Date().toISOString()
+    const savingPlan = plan.value
+    const savingRevision = savingPlan.revision
     const operation = repository.save(cloneJson(plan.value))
     persistInFlight = operation
     try {
       await operation
-      persistState.value = 'saved'
+      if (plan.value === savingPlan && plan.value.revision === savingRevision) {
+        persistState.value = 'saved'
+      }
+      return true
     } catch (error) {
-      persistState.value = 'failed'
+      if (plan.value === savingPlan) persistState.value = 'failed'
       throw error
     } finally {
       if (persistInFlight === operation) persistInFlight = null
@@ -218,6 +231,7 @@ export const useDraftStore = defineStore('draft', () => {
       persistTimer = undefined
     }
     await persistInFlight?.catch(() => undefined)
+    await adjustmentSettled
   }
 
   function resumePersistence(): void {
@@ -377,7 +391,52 @@ export const useDraftStore = defineStore('draft', () => {
 
   const changeKey = (itemId: string, field: AdjustableField): string => `${itemId}:${field}`
 
+  type AdjustmentWrite = { item: DraftItem; field: AdjustableField; before: SourcedValue<number>; after: SourcedValue<number> }
+
+  async function persistAdjustment(previousPlan: DraftPlan, writes: AdjustmentWrite[]): Promise<boolean> {
+    const targetPlan = plan.value
+    const targetRevision = targetPlan.revision
+    const targetFingerprint = fingerprintDraftPlan(targetPlan)
+    const targetPersonalization = targetPlan.personalization
+    const targetProposal = targetPersonalization?.proposal
+    let settle!: () => void
+    adjustmentSettled = new Promise<void>((resolve) => { settle = resolve })
+    adjustmentPending.value = true
+    try {
+      if (!await persistCurrentPlan(targetPlan)) throw new Error('adjustment save interrupted')
+      return plan.value === targetPlan
+    } catch {
+      // Never replace a newly loaded/cleared plan or undo edits made during the write.
+      if (plan.value === targetPlan) {
+        if (targetPlan.revision === targetRevision
+          && fingerprintDraftPlan(targetPlan) === targetFingerprint
+          && targetPlan.personalization === targetPersonalization
+          && targetPlan.personalization?.proposal === targetProposal) {
+          plan.value = previousPlan
+        } else {
+          for (const write of writes) {
+            if (targetPlan.items.includes(write.item) && write.item[write.field] === write.after) {
+              write.item[write.field] = cloneJson(write.before)
+            }
+          }
+          targetPlan.revision = (targetPlan.revision ?? 0) + 1
+          targetPlan.personalization = {
+            proposal: null,
+            applied: cloneJson(previousPlan.personalization?.applied ?? null),
+          }
+        }
+      }
+      return false
+    } finally {
+      // Autosaves must see the settled result, never the provisional failed adjustment.
+      adjustmentPending.value = false
+      adjustmentSettled = null
+      settle()
+    }
+  }
+
   async function applyAdjustmentProposal(proposalId: string): Promise<ApplyAdjustmentResult> {
+    if (adjustmentPending.value || persistenceSuspended || !repository) return 'conflict'
     const proposal = plan.value.personalization?.proposal
     if (
       !proposal
@@ -398,6 +457,7 @@ export const useDraftStore = defineStore('draft', () => {
     }
 
     const previousPlan = cloneJson(plan.value)
+    const writes: AdjustmentWrite[] = []
     const previous = plan.value.personalization?.applied
     const baseByKey = new Map(
       (previous?.baseValues ?? []).map((entry) => [changeKey(entry.itemId, entry.field), entry]),
@@ -416,7 +476,9 @@ export const useDraftStore = defineStore('draft', () => {
           source: change.before.source,
         })
       }
+      const before = cloneJson(item[change.field])
       item[change.field] = cloneJson(change.after)
+      writes.push({ item, field: change.field, before, after: item[change.field] })
       appliedByKey.set(key, {
         itemId: change.itemId,
         field: change.field,
@@ -434,19 +496,15 @@ export const useDraftStore = defineStore('draft', () => {
     }
     plan.value.revision = (plan.value.revision ?? 0) + 1
     plan.value.personalization = { proposal: null, applied }
-    try {
-      await flushPersist()
-      return 'applied'
-    } catch {
-      plan.value = previousPlan
-      return 'persist_failed'
-    }
+    return await persistAdjustment(previousPlan, writes) ? 'applied' : 'persist_failed'
   }
 
   async function restoreBasePlan(): Promise<RestoreAdjustmentResult> {
+    if (adjustmentPending.value || persistenceSuspended || !repository) return { status: 'busy' }
     const applied = plan.value.personalization?.applied
     if (!applied) return { status: 'nothing_to_restore' }
     const previousPlan = cloneJson(plan.value)
+    const writes: AdjustmentWrite[] = []
     const appliedByKey = new Map(
       applied.appliedValues.map((entry) => [changeKey(entry.itemId, entry.field), entry]),
     )
@@ -463,17 +521,14 @@ export const useDraftStore = defineStore('draft', () => {
         || current.value !== expected.value
       ) continue
       item[base.field] = { value: base.value, source: base.source }
+      writes.push({ item, field: base.field, before: cloneJson(current), after: item[base.field] })
       restored += 1
     }
     plan.value.revision = (plan.value.revision ?? 0) + 1
     plan.value.personalization = { proposal: null, applied: null }
-    try {
-      await flushPersist()
-      return { status: 'restored', count: restored }
-    } catch {
-      plan.value = previousPlan
-      return { status: 'persist_failed' }
-    }
+    return await persistAdjustment(previousPlan, writes)
+      ? { status: 'restored', count: restored }
+      : { status: 'persist_failed' }
   }
 
   return {
@@ -484,6 +539,7 @@ export const useDraftStore = defineStore('draft', () => {
     persistMessage,
     adjustmentProposal,
     appliedAdjustment,
+    adjustmentPending,
     load,
     reload,
     flushPersist,

@@ -1,7 +1,9 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 
-test('TrainPal previews and applies only confirmed deterministic plan changes', async ({ page }) => {
+for (const width of [320, 390, 768, 1440]) {
+test(`TrainPal previews and applies confirmed changes at ${width}px`, async ({ page }, testInfo) => {
+  await page.setViewportSize({ width, height: 900 })
   await page.goto('/train')
   await page.getByRole('button', { name: '使用快速体验方案' }).click()
   await expect(page).toHaveURL(/\/plan$/)
@@ -19,11 +21,17 @@ test('TrainPal previews and applies only confirmed deterministic plan changes', 
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze()
   expect(accessibility.violations).toEqual([])
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('adjustment-preview.png'), fullPage: true })
   await dialog.locator('button[data-apply-adjustment]').click()
 
+  await expect(page.getByRole('heading', { name: '已为本次训练调整' })).toBeVisible()
+  await expect(page.locator('.action-summary').first()).toContainText('每组 35 秒')
+  await page.reload()
   await expect(page.getByRole('heading', { name: '已为本次训练调整' })).toBeVisible()
   await expect(page.locator('.action-summary').first()).toContainText('每组 35 秒')
   await page.locator('button[data-restore-base-plan]').click()
   await expect(page.getByRole('heading', { name: '需要更贴近你现在的状态？' })).toBeVisible()
   await expect(page.locator('.action-summary').first()).toContainText('每组 30 秒')
 })
+}
