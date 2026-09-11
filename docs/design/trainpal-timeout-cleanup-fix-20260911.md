@@ -58,9 +58,11 @@ semantics; the monitor continues to expose any surviving process.
 - Focused media processor suite: **19 passed**.
 - Timeout, cancellation, unstoppable process and native-fallback cases:
   **20 consecutive invocations × 9 cases = 180 passed**.
-- Full `pnpm check`, E2E, independent Standards/Spec review and Linux CI:
-  pending at the initial implementation checkpoint; final receipts will be
-  recorded on the Draft PR.
+- Full local `pnpm check`: passed lint, type checks, **204 web tests / 433 API
+  tests**, and production build.
+- Local `pnpm test:e2e`: **22 passed**, using the inherited single-worker setting.
+- Independent Standards/Spec review and Linux CI: pending at this local
+  verification checkpoint; final receipts will be recorded on the Draft PR.
 
 This fixes a cleanup lifecycle bug, not analysis accuracy, analysis speed or
 frontend density. Those remain separate issues. A future cleanup change should
