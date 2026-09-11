@@ -226,7 +226,8 @@ class LocalMediaProcessor:
                 await asyncio.gather(*extraction_tasks)
             finally:
                 for task in extraction_tasks:
-                    if not task.done():
+                    # gather already forwards cancellation; let in-flight cleanup finish.
+                    if not task.done() and not task.cancelling():
                         task.cancel()
                 await asyncio.gather(*extraction_tasks, return_exceptions=True)
             yield PreparedMedia(
