@@ -552,4 +552,63 @@ describe('方案草稿保存状态', () => {
 
     expect(wrapper.get('video').attributes('src')).toBe('blob:plan-preview')
   })
+
+  it('previews, applies, and restores a deterministic TrainPal adjustment', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const repository = new RecoverableDraftRepository()
+    repository.failSave = false
+    const draft = useDraftStore()
+    await draft.load(repository)
+    draft.addManualAction({ name: '深蹲', mode: 'reps' })
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/plan', component: PlanDraftView },
+        { path: '/personalize', component: { template: '<p>GYMTI</p>' } },
+      ],
+    })
+    await router.push('/plan')
+    await router.isReady()
+    const wrapper = mount(PlanDraftView, {
+      attachTo: document.body,
+      global: { plugins: [pinia, router] },
+    })
+
+    await wrapper.get('button[data-adjustment-trigger]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="dialog"]').text()).toContain('调整这次训练')
+    await wrapper.get('button[data-adjustment-intent="more_challenging"]').trigger('click')
+    await wrapper.get('button[data-generate-adjustment]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.adjustment-change-list').text()).toContain('10 次 → 12 次')
+    await wrapper.get('button[data-adjustment-intent="easier_to_finish"]').trigger('click')
+    expect(wrapper.find('button[data-apply-adjustment]').exists()).toBe(false)
+    expect(wrapper.find('.adjustment-change-list').exists()).toBe(false)
+    await wrapper.get('button[data-adjustment-intent="more_challenging"]').trigger('click')
+    await wrapper.get('button[data-generate-adjustment]').trigger('click')
+    await wrapper.get('button[data-adjustment-safety-stop]').trigger('click')
+    expect(wrapper.find('button[data-apply-adjustment]').exists()).toBe(false)
+    expect(draft.adjustmentProposal).toBeNull()
+    await wrapper.get('button[data-adjustment-safety-stop]').trigger('click')
+    await wrapper.get('button[data-generate-adjustment]').trigger('click')
+    await flushPromises()
+    await wrapper.get('button[data-apply-adjustment]').trigger('click')
+    await flushPromises()
+    expect(draft.items[0]!.reps).toEqual({ value: 12, source: 'personalized' })
+    expect(wrapper.text()).toContain('已为本次训练调整')
+
+    await wrapper.get('button[data-restore-base-plan]').trigger('click')
+    await flushPromises()
+    expect(draft.items[0]!.reps).toEqual({ value: 10, source: 'rule' })
+
+    await wrapper.get('button[data-adjustment-trigger]').trigger('click')
+    await wrapper.get('button[data-adjustment-safety-stop]').trigger('click')
+    await wrapper.get('button[data-adjustment-intent="more_challenging"]').trigger('click')
+    await wrapper.get('button[data-generate-adjustment]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="dialog"]').text()).toContain('有不适时不会生成调整')
+    expect(wrapper.find('.adjustment-change-list').exists()).toBe(false)
+  })
 })
