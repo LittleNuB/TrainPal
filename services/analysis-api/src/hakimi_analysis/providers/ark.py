@@ -18,6 +18,7 @@ from hakimi_analysis.providers.base import (
     raise_for_provider_status,
     request_with_retry,
 )
+from hakimi_analysis.providers.speech_time_units import reconcile_speech_time_units
 
 StructuredResult = TypeVar("StructuredResult", bound=BaseModel)
 MAX_INLINE_VIDEO_BYTES = 45_000_000
@@ -79,7 +80,7 @@ class ArkResponsesClient:
                 or signal.end_seconds > window.end_seconds + 0.5
             ):
                 raise ProviderSchemaError("语音理解时间超出分析窗口")
-        return result
+        return reconcile_speech_time_units(result, transcript)
 
     async def locate_visual(
         self,
