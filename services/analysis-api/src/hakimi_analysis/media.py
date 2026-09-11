@@ -380,6 +380,25 @@ async def _stop_process(
     process: subprocess.Popen[bytes],
     communication: asyncio.Future[Any],
 ) -> BaseException | None:
+    # A sibling can fail while this process is already stopping after a timeout.
+    # Defer cancellation until cleanup finishes; shield alone would abandon it.
+    cleanup = asyncio.create_task(_finish_process_cleanup(process, communication))
+    cancelled = False
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            cancelled = True
+    result = cleanup.result()
+    if cancelled:
+        raise asyncio.CancelledError
+    return result
+
+
+async def _finish_process_cleanup(
+    process: subprocess.Popen[bytes],
+    communication: asyncio.Future[Any],
+) -> BaseException | None:
     def stop() -> None:
         if process.poll() is None:
             try:
