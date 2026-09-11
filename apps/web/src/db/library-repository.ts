@@ -1,5 +1,6 @@
 import type { HachimiDatabase } from '@/db/hachimi-database'
 import { database } from '@/db/hachimi-database'
+import { archiveDraft } from '@/db/plan-archive'
 import type { DraftItem, DraftPlan } from '@/domain/types'
 import type {
   Preferences,
@@ -92,6 +93,10 @@ export const createDexieLibraryRepository = (
         id: createId(),
         name: normalizedName,
         items: structuredClone(current.items),
+        revision: current.revision,
+        personalization: current.personalization
+          ? { proposal: null, applied: structuredClone(current.personalization.applied) }
+          : undefined,
         createdAt: timestamp,
         updatedAt: timestamp,
       }
@@ -99,6 +104,7 @@ export const createDexieLibraryRepository = (
         ...structuredClone(current),
         name: normalizedName,
         linkedPlanId: plan.id,
+        personalization: structuredClone(plan.personalization),
         updatedAt: timestamp,
       }
       await db.plans.add(plan)
@@ -117,6 +123,8 @@ export const createDexieLibraryRepository = (
         name: plan.name,
         linkedPlanId: plan.id,
         items: structuredClone(plan.items),
+        revision: plan.revision,
+        personalization: structuredClone(plan.personalization),
         updatedAt: now().toISOString(),
       }
       await db.drafts.put(draft)
@@ -131,8 +139,10 @@ export const createDexieLibraryRepository = (
       const current = await db.drafts.get('current')
       if (!current || current.linkedPlanId !== planId) return null
       const nextDraft: DraftPlan = {
-        ...structuredClone(current),
+        id: 'current',
+        name: '未命名方案',
         linkedPlanId: null,
+        items: [],
         updatedAt: now().toISOString(),
       }
       await db.drafts.put(nextDraft)
@@ -149,8 +159,11 @@ export const createDexieLibraryRepository = (
       items: structuredClone(input.items),
       updatedAt: now().toISOString(),
     }
-    await db.drafts.put(draft)
-    return draft
+    return db.transaction('rw', db.drafts, db.plans, async () => {
+      const previous = await db.drafts.get('current')
+      if (previous && !previous.linkedPlanId && previous.items.length) await archiveDraft(db, previous)
+      return archiveDraft(db, draft, createId)
+    })
   },
 
   async clearAllLocalData() {

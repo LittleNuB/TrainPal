@@ -116,4 +116,7 @@ test('video result becomes a base plan, resolves uncertainty, and restores from 
   await expect(page.getByText('这个动作没有参考视频')).toBeVisible()
   await expect(page.getByRole('heading', { name: '训练完成' })).toBeVisible({ timeout: 5_000 })
   await expect(page.getByText(/实际完成量已保存到本机/)).toBeVisible()
+  await page.goto('/train')
+  await expect(page.locator('.saved-row')).toHaveCount(1)
+  await expect(page.locator('.saved-row')).toContainText('3 个动作')
 })

@@ -29,12 +29,19 @@ const prepareReplacement = async (message: string): Promise<boolean> => {
   if (draft.items.length > 0 && !window.confirm(message)) return false
   pending.value = true
   notice.value = ''
-  await draft.quiescePersistence()
-  return true
+  try {
+    await draft.flushPersist()
+    await draft.quiescePersistence()
+    return true
+  } catch {
+    notice.value = '当前修改还没保存成功，请重试后再切换方案'
+    pending.value = false
+    return false
+  }
 }
 
 const useQuickPlan = async (): Promise<void> => {
-  if (!await prepareReplacement('使用快速体验方案会替换当前方案，确定继续吗？')) return
+  if (!await prepareReplacement('切换到快速体验方案？当前方案会保留在方案库。')) return
   try {
     draft.adoptPersistedPlan(await library.useQuickExperience())
     await router.push('/plan')
@@ -47,7 +54,7 @@ const useQuickPlan = async (): Promise<void> => {
 }
 
 const openPlan = async (planId: string): Promise<void> => {
-  if (!await prepareReplacement('打开这个方案会替换当前方案，确定继续吗？')) return
+  if (!await prepareReplacement('打开这个方案？当前方案会保留在方案库。')) return
   try {
     draft.adoptPersistedPlan(await library.openPlan(planId))
     await router.push('/plan')
@@ -60,7 +67,8 @@ const openPlan = async (planId: string): Promise<void> => {
 }
 
 const deletePlan = async (planId: string, planName: string): Promise<void> => {
-  if (pending.value || !window.confirm(`删除“${planName}”？已有训练记录会保留。`)) return
+  const closingCurrent = draft.plan.linkedPlanId === planId ? '当前编辑也会关闭。' : ''
+  if (pending.value || !window.confirm(`删除“${planName}”？${closingCurrent}已有训练记录会保留。`)) return
   pending.value = true
   notice.value = ''
   try {
@@ -77,8 +85,22 @@ const deletePlan = async (planId: string, planName: string): Promise<void> => {
   }
 }
 
+const createPlan = async (): Promise<void> => {
+  if (!await prepareReplacement('新建一个方案？当前方案会保留在方案库。')) return
+  try {
+    draft.adoptPersistedPlan(await library.replaceCurrentDraft({ name: '未命名方案', items: [] }))
+    await router.push('/plan')
+  } catch {
+    notice.value = '新方案没有创建成功，请重试'
+  } finally {
+    draft.resumePersistence()
+    pending.value = false
+  }
+}
+
 onMounted(async () => {
   try {
+    await draft.flushPersist()
     await library.refreshHistory()
   } catch {
     notice.value = '训练方案暂时没有读取成功，请稍后重试'
@@ -115,7 +137,7 @@ onMounted(async () => {
     <section v-else-if="draft.items.length" class="focus-card current-plan tp-card">
       <p class="tp-kicker">CURRENT PLAN</p>
       <h2>{{ draft.plan.name }}</h2>
-      <p>当前方案会自动保存在本机。开始前仍可以自由调整每个字段。</p>
+      <p>开始前，可以修改动作、组数和休息时间。</p>
       <div class="focus-stats">
         <span><b>{{ draft.items.length }}</b> 个动作</span>
         <span>约 {{ currentPlanMinutes || '—' }} 分钟</span>
@@ -137,11 +159,12 @@ onMounted(async () => {
     <section class="saved-section">
       <div class="section-title">
         <div>
-          <p class="tp-kicker">SAVED PLANS</p>
-          <h2>已存方案</h2>
+          <h2>方案库 <span class="plan-count">{{ library.plans.length }}</span></h2>
         </div>
-        <b>{{ library.plans.length }}</b>
+        <button class="new-plan" type="button" :disabled="pending" @click="createPlan">新建方案</button>
       </div>
+
+      <p class="library-note">方案自动保存，仅此浏览器可用；清除浏览器数据会丢失。</p>
 
       <div v-if="library.plans.length" class="saved-list">
         <article v-for="plan in visiblePlans" :key="plan.id" class="saved-row">
@@ -165,7 +188,7 @@ onMounted(async () => {
         {{ showAllPlans ? '收起方案' : `查看全部 ${library.plans.length} 个方案` }}
       </button>
       <div v-if="!library.plans.length" class="saved-empty">
-        <p>在方案页使用“另存为”，常练的安排会出现在这里。</p>
+        <p>进入编辑的非空方案会自动保存在这里。</p>
         <RouterLink to="/">去导入视频</RouterLink>
       </div>
     </section>
@@ -202,6 +225,9 @@ onMounted(async () => {
 .saved-section { display: grid; gap: 12px; }
 .section-title { display: flex; align-items: end; justify-content: space-between; }
 .section-title h2 { margin: 5px 0 0; font-size: 24px; }
+.plan-count { margin-left: 6px; color: var(--tp-muted); font-size: 15px; font-weight: 400; }
+.new-plan { min-height: 44px; padding: 8px 14px; border: 1px solid var(--tp-line); border-radius: 24px; color: var(--tp-ink); background: var(--tp-surface); font-size: 13px; }
+.library-note { margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.6; }
 .section-title > b { color: var(--tp-muted); font: 700 34px/1 var(--font-display); }
 .saved-list { display: grid; overflow: hidden; border: 1px solid var(--tp-line); border-radius: 18px; background: var(--tp-surface); }
 .saved-row { display: flex; align-items: stretch; border-top: 1px solid var(--tp-line); }

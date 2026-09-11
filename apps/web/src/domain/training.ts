@@ -1,10 +1,12 @@
-import type { DraftItem } from '@/domain/types'
+import type { DraftItem, DraftPlan } from '@/domain/types'
 import type { CoachStyleId } from '@/domain/coach'
 
 export interface SavedPlan {
   id: string
   name: string
   items: DraftItem[]
+  revision?: DraftPlan['revision']
+  personalization?: DraftPlan['personalization']
   createdAt: string
   updatedAt: string
 }

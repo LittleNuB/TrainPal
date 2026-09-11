@@ -37,10 +37,10 @@ test('quick plan completes through save-as, rest recovery, TrainPal, record, and
     await expect(sheet).toBeHidden()
   }
 
-  await page.getByRole('button', { name: '另存为' }).click()
+  await page.getByRole('button', { name: '复制方案' }).click()
   await page.getByLabel('新方案名称').fill('评委演示方案')
-  await page.getByRole('button', { name: '保存副本' }).click()
-  await expect(page.getByText('已另存为新方案')).toBeVisible()
+  await page.getByRole('button', { name: '创建副本' }).click()
+  await expect(page.getByText('已创建方案副本')).toBeVisible()
   await page.getByRole('button', { name: '开始训练' }).click()
 
   await expect(page).toHaveURL(/\/training$/)
