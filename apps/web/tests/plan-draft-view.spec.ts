@@ -295,8 +295,8 @@ describe('方案草稿保存状态', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.get('.operation-error[role="alert"]').text()).toContain('另存为没有成功')
-    expect(wrapper.get('button[aria-label="重试另存为"]')).toBeTruthy()
+    expect(wrapper.get('.operation-error[role="alert"]').text()).toContain('复制方案没有成功')
+    expect(wrapper.get('button[aria-label="重试复制方案"]')).toBeTruthy()
     expect(wrapper.text()).not.toContain('indexeddb transaction failed')
   })
 

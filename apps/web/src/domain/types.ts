@@ -132,6 +132,7 @@ export interface DraftSourceRef {
 export interface DraftItem {
   id: string
   name: string
+  origin?: 'quick_experience'
   sourceRef: DraftSourceRef | null
   segment: SourcedValue<Segment>
   confirmationStatus?: 'confirmed' | 'pending'
@@ -155,5 +156,5 @@ export interface DraftPlan {
 
 export interface DraftRepository {
   load(): Promise<DraftPlan | undefined>
-  save(plan: DraftPlan): Promise<void>
+  save(plan: DraftPlan): Promise<DraftPlan | void>
 }

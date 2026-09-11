@@ -20,6 +20,8 @@ import type {
   SourcedValue,
 } from '@/domain/types'
 import { toSafeOriginUrl } from '@/domain/source'
+import { normalizeDraftItems } from '@/domain/plan'
+import { QUICK_EXPERIENCE_PLAN_NAME } from '@/features/quick-experience/fixture'
 import {
   fingerprintDraftPlan,
   proposePlanAdjustment,
@@ -58,12 +60,7 @@ const normalizePlan = (nextPlan: DraftPlan): DraftPlan => ({
   personalization: nextPlan.personalization
     ? cloneJson(nextPlan.personalization)
     : emptyPersonalization(),
-  items: nextPlan.items.map((rawItem) => {
-    const { segmentRole: _legacySegmentRole, ...item } = rawItem as DraftItem & {
-      segmentRole?: unknown
-    }
-    return cloneJson(item)
-  }),
+  items: normalizeDraftItems(nextPlan.items, nextPlan.name === QUICK_EXPERIENCE_PLAN_NAME),
 })
 
 const sourced = <T>(value: T | null, source: SourcedValue<T>['source']): SourcedValue<T> => ({
@@ -126,7 +123,7 @@ export const useDraftStore = defineStore('draft', () => {
   const adjustmentPending = ref(false)
   let repository: DraftRepository | undefined
   let persistTimer: ReturnType<typeof setTimeout> | undefined
-  let persistInFlight: Promise<void> | null = null
+  let persistInFlight: Promise<DraftPlan | void> | null = null
   let persistenceSuspended = false
   let adjustmentSettled: Promise<void> | null = null
 
@@ -200,10 +197,15 @@ export const useDraftStore = defineStore('draft', () => {
     plan.value.updatedAt = new Date().toISOString()
     const savingPlan = plan.value
     const savingRevision = savingPlan.revision
-    const operation = repository.save(cloneJson(plan.value))
+    const snapshot = cloneJson(savingPlan)
+    const operation = repository.save(snapshot)
     persistInFlight = operation
     try {
-      await operation
+      const saved = await operation
+      if (saved && plan.value === savingPlan) {
+        plan.value.linkedPlanId = saved.linkedPlanId
+        if (plan.value.name === snapshot.name) plan.value.name = saved.name
+      }
       if (plan.value === savingPlan && plan.value.revision === savingRevision) {
         persistState.value = 'saved'
       }
@@ -278,9 +280,11 @@ export const useDraftStore = defineStore('draft', () => {
       fromCandidate(candidate, sources[candidate.source_id]),
     )
     if (strategy === 'replace') {
-      plan.value.name = '未命名方案'
-      plan.value.linkedPlanId = null
-      plan.value.items = proposalItems
+      plan.value = {
+        ...emptyPlan(),
+        revision: plan.value.revision,
+        items: proposalItems,
+      }
     } else {
       plan.value.items.push(...proposalItems)
     }

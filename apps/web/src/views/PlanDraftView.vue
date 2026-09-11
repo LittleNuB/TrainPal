@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
 
 import { useDialogFocus } from '@/composables/useDialogFocus'
 import { fingerprintMatches, probeVideoDuration, SUPPORTED_LOCAL_MEDIA_TYPES } from '@/domain/local-media'
@@ -35,6 +35,7 @@ const starting = ref(false)
 const showSaveAs = ref(false)
 const saveAsName = ref('')
 const savingPlan = ref(false)
+onBeforeRouteLeave(() => !savingPlan.value)
 const saveMessage = ref('')
 const operationError = ref<OperationError | null>(null)
 const planNameError = ref('')
@@ -83,7 +84,8 @@ const adjustmentContextStale = computed(() => Boolean(
 ))
 
 const isQuickExperience = computed(() =>
-  draft.plan.linkedPlanId === null && draft.plan.name === QUICK_EXPERIENCE_PLAN_NAME,
+  draft.items.some((item) => item.origin === 'quick_experience')
+  || draft.plan.name === QUICK_EXPERIENCE_PLAN_NAME,
 )
 
 const selectedItem = computed(() =>
@@ -396,6 +398,7 @@ const useQuickPlan = async (): Promise<void> => {
   quickPlanPending.value = true
   quickPlanError.value = ''
   try {
+    await draft.flushPersist()
     await draft.quiescePersistence()
     draft.adoptPersistedPlan(await library.useQuickExperience())
   } catch {
@@ -419,12 +422,14 @@ const saveAs = async (): Promise<void> => {
   operationError.value = null
   try {
     await draft.flushPersist()
+    await draft.quiescePersistence()
     draft.adoptPersistedPlan(await library.saveCurrentDraftAs(saveAsName.value))
     showSaveAs.value = false
-    saveMessage.value = '已另存为新方案'
+    saveMessage.value = '已创建方案副本'
   } catch {
-    operationError.value = { action: 'save_as', message: '另存为没有成功，请重试' }
+    operationError.value = { action: 'save_as', message: '复制方案没有成功，请重试' }
   } finally {
+    draft.resumePersistence()
     savingPlan.value = false
   }
 }
@@ -437,229 +442,232 @@ const retryOperation = async (): Promise<void> => {
 
 <template>
   <main class="plan-page tp-page tp-page--immersive">
-    <header class="plan-header">
+    <header class="plan-header" :inert="savingPlan || undefined">
       <RouterLink to="/" class="back-link" aria-label="返回首页">←</RouterLink>
       <span>训练方案</span>
       <span class="header-spacer" aria-hidden="true" />
     </header>
 
-    <section class="plan-hero">
-      <p class="tp-kicker">{{ draft.plan.linkedPlanId ? 'SAVED PLAN' : 'CURRENT PLAN' }}</p>
-      <h1 class="plan-title-heading" aria-label="当前训练方案">
-        <input
-          class="plan-title-input"
-          :value="draft.plan.name"
-          aria-label="方案名称"
-          :aria-invalid="planNameError ? true : undefined"
-          @change="updatePlanName"
+    <p v-if="savingPlan" role="status">正在创建方案副本…</p>
+    <div class="plan-workspace" :inert="savingPlan || undefined">
+      <section class="plan-hero">
+        <p class="tp-kicker">{{ draft.plan.linkedPlanId ? 'SAVED PLAN' : 'CURRENT PLAN' }}</p>
+        <h1 class="plan-title-heading" aria-label="当前训练方案">
+          <input
+            class="plan-title-input"
+            :value="draft.plan.name"
+            aria-label="方案名称"
+            :aria-invalid="planNameError ? true : undefined"
+            @change="updatePlanName"
+          />
+        </h1>
+        <p v-if="planNameError" class="plan-name-error" role="alert">{{ planNameError }}</p>
+        <div class="plan-metrics" aria-label="方案摘要">
+          <span><b>{{ draft.items.length }}</b> 个动作</span>
+          <span><b>{{ totalSets }}</b> 组</span>
+          <span><b>{{ estimatedMinutes || '—' }}</b> 分钟约用时</span>
+        </div>
+      </section>
+
+      <p v-if="isQuickExperience" class="quick-notice">快速体验方案 · 这个方案不是 AI 分析结果</p>
+      <p v-if="pendingCount" class="pending-notice" role="status">
+        {{ pendingCount }} 个动作需要确认，确认前不会进入训练。点击动作即可查看并决定。
+      </p>
+      <p v-if="saveMessage" class="save-message" role="status">{{ saveMessage }}</p>
+
+      <section v-if="draft.items.length" class="coach-card tp-card" aria-labelledby="coach-card-title">
+        <CoachMotion
+          state="idle"
+          :style-id="library.preferences.coachStyleId"
+          :visible="library.preferences.petVisible"
         />
-      </h1>
-      <p v-if="planNameError" class="plan-name-error" role="alert">{{ planNameError }}</p>
-      <div class="plan-metrics" aria-label="方案摘要">
-        <span><b>{{ draft.items.length }}</b> 个动作</span>
-        <span><b>{{ totalSets }}</b> 组</span>
-        <span><b>{{ estimatedMinutes || '—' }}</b> 分钟约用时</span>
-      </div>
-    </section>
-
-    <p v-if="isQuickExperience" class="quick-notice">快速体验方案 · 这个方案不是 AI 分析结果</p>
-    <p v-if="pendingCount" class="pending-notice" role="status">
-      {{ pendingCount }} 个动作需要确认，确认前不会进入训练。点击动作即可查看并决定。
-    </p>
-    <p v-if="saveMessage" class="save-message" role="status">{{ saveMessage }}</p>
-
-    <section v-if="draft.items.length" class="coach-card tp-card" aria-labelledby="coach-card-title">
-      <CoachMotion
-        state="idle"
-        :style-id="library.preferences.coachStyleId"
-        :visible="library.preferences.petVisible"
-      />
-      <div v-if="!library.preferences.coachStyleId" class="coach-mark" aria-hidden="true">TP</div>
-      <div>
-        <p class="tp-kicker">TRAINPAL COACH</p>
-        <h2 id="coach-card-title">
-          {{ draft.appliedAdjustment ? '已为本次训练调整' : '需要更贴近你现在的状态？' }}
-        </h2>
-        <p v-if="draft.appliedAdjustment">调整只改变了组数、次数或时长、休息；你的手动修改仍然优先。</p>
-        <p v-else>想轻松一点，还是增加挑战？先看看建议，满意再调整。</p>
-      </div>
-      <div class="coach-actions">
-        <button type="button" data-adjustment-trigger :disabled="draft.adjustmentPending" @click="openAdjustment">
-          {{ draft.appliedAdjustment ? '重新调整' : '让 TrainPal 调整这次训练' }}
-        </button>
-        <button
-          v-if="draft.appliedAdjustment"
-          type="button"
-          data-restore-base-plan
-          :disabled="draft.adjustmentPending"
-          @click="restoreBasePlan"
-        >
-          恢复基础方案
-        </button>
-        <RouterLink to="/personalize">GYMTI 与教练风格</RouterLink>
-      </div>
-    </section>
-
-    <p v-if="adjustmentNotice" class="adjustment-notice" role="status">{{ adjustmentNotice }}</p>
-
-    <section v-if="draft.items.length" class="plan-list" aria-label="动作安排">
-      <article
-        v-for="(item, index) in draft.items"
-        :key="item.id"
-        class="plan-card"
-        :class="{
-          'has-validation-error': validationIssuesForItem(item.id).length,
-          'needs-confirmation': item.confirmationStatus === 'pending',
-        }"
-        :aria-describedby="validationIssuesForItem(item.id).length ? validationId(item.id) : undefined"
-        tabindex="-1"
-      >
-        <span class="action-index">{{ String(index + 1).padStart(2, '0') }}</span>
-        <button type="button" class="action-summary" @click="openEditor(item.id, $event)">
-          <span>
-            <strong>
-              {{ item.name }}
-              <em v-if="item.confirmationStatus === 'pending'" class="pending-badge">待确认</em>
-            </strong>
-            <small>{{ item.sets.value ?? '—' }} 组 · 每组 {{ actionTarget(item) }} · 休息 {{ item.restSeconds.value ?? '—' }} 秒</small>
-          </span>
-          <b aria-hidden="true">›</b>
-        </button>
-        <div class="order-controls" aria-label="调整动作顺序">
-          <button type="button" aria-label="上移" :disabled="index === 0" @click="draft.move(item.id, -1)">↑</button>
-          <button type="button" aria-label="下移" :disabled="index === draft.items.length - 1" @click="draft.move(item.id, 1)">↓</button>
-        </div>
-
-        <div v-if="item.sourceRef" class="source-shortcut">
-          <span>{{ sourceLabel(item) }}</span>
-          <a
-            v-if="originalUrl(item)"
-            class="original-video-link"
-            :href="originalUrl(item)"
-            target="_blank"
-            rel="noopener noreferrer"
-          >查看原视频</a>
-          <button
-            v-else-if="isLocalSource(item)"
-            type="button"
-            class="local-preview-button"
-            @click="openEditorWithPreview(item, $event)"
-          >
-            预览来源视频
-          </button>
-        </div>
-
-        <div
-          v-if="validationIssuesForItem(item.id).length"
-          :id="validationId(item.id)"
-          class="card-validation"
-          role="alert"
-        >
-          <strong>请检查这个动作</strong>
-          <p v-for="issue in validationIssuesForItem(item.id)" :key="`${issue.itemId}-${issue.field}`">
-            {{ issue.message }}
-          </p>
-        </div>
-      </article>
-    </section>
-
-    <section v-else class="empty-plan tp-card">
-      <span>00</span>
-      <h2>还没有训练动作</h2>
-      <p>可以重新选择视频，也可以直接创建一个没有参考视频的动作。</p>
-      <button type="button" :disabled="quickPlanPending" @click="useQuickPlan">
-        {{ quickPlanPending ? '正在载入…' : '使用快速体验方案' }}
-      </button>
-      <small>这是产品示例，不是 AI 分析结果。</small>
-      <p v-if="quickPlanError" class="empty-plan-error" role="alert">{{ quickPlanError }}</p>
-    </section>
-
-    <section class="plan-tools" aria-label="方案次级操作">
-      <button v-if="!showManual" type="button" class="manual-trigger" @click="showManual = true">
-        <span aria-hidden="true">＋</span>
-        <span><strong>创建动作</strong><small>没有参考视频也可以</small></span>
-      </button>
-      <form v-else class="manual-form tp-card" @submit.prevent="addManual">
+        <div v-if="!library.preferences.coachStyleId" class="coach-mark" aria-hidden="true">TP</div>
         <div>
-          <p class="tp-kicker">MANUAL ACTION</p>
-          <h2>创建自建动作</h2>
+          <p class="tp-kicker">TRAINPAL COACH</p>
+          <h2 id="coach-card-title">
+            {{ draft.appliedAdjustment ? '已为本次训练调整' : '需要更贴近你现在的状态？' }}
+          </h2>
+          <p v-if="draft.appliedAdjustment">调整只改变了组数、次数或时长、休息；你的手动修改仍然优先。</p>
+          <p v-else>想轻松一点，还是增加挑战？先看看建议，满意再调整。</p>
         </div>
-        <label>
-          动作名称
-          <input v-model="manualName" autofocus placeholder="例如：平板支撑" />
-        </label>
-        <div class="mode-toggle">
-          <button type="button" :class="{ active: manualMode === 'reps' }" @click="manualMode = 'reps'">按次数</button>
-          <button type="button" :class="{ active: manualMode === 'duration' }" @click="manualMode = 'duration'">按时长</button>
+        <div class="coach-actions">
+          <button type="button" data-adjustment-trigger :disabled="draft.adjustmentPending" @click="openAdjustment">
+            {{ draft.appliedAdjustment ? '重新调整' : '让 TrainPal 调整这次训练' }}
+          </button>
+          <button
+            v-if="draft.appliedAdjustment"
+            type="button"
+            data-restore-base-plan
+            :disabled="draft.adjustmentPending"
+            @click="restoreBasePlan"
+          >
+            恢复基础方案
+          </button>
+          <RouterLink to="/personalize">GYMTI 与教练风格</RouterLink>
         </div>
-        <div class="manual-actions">
-          <button type="button" @click="showManual = false">取消</button>
-          <button type="submit" class="confirm" :disabled="!manualName.trim()">加入方案</button>
-        </div>
-      </form>
+      </section>
 
-      <section v-if="draft.items.length" class="save-as-panel">
-        <button v-if="!showSaveAs" type="button" @click="beginSaveAs">另存为</button>
-        <form v-else @submit.prevent="saveAs">
-          <label>
-            新方案名称
-            <input v-model="saveAsName" aria-label="新方案名称" autofocus maxlength="40" />
-          </label>
-          <div>
-            <button type="button" @click="showSaveAs = false">取消</button>
-            <button type="submit" class="confirm" :disabled="!saveAsName.trim() || savingPlan">
-              {{ savingPlan ? '保存中…' : '保存副本' }}
+      <p v-if="adjustmentNotice" class="adjustment-notice" role="status">{{ adjustmentNotice }}</p>
+
+      <section v-if="draft.items.length" class="plan-list" aria-label="动作安排">
+        <article
+          v-for="(item, index) in draft.items"
+          :key="item.id"
+          class="plan-card"
+          :class="{
+            'has-validation-error': validationIssuesForItem(item.id).length,
+            'needs-confirmation': item.confirmationStatus === 'pending',
+          }"
+          :aria-describedby="validationIssuesForItem(item.id).length ? validationId(item.id) : undefined"
+          tabindex="-1"
+        >
+          <span class="action-index">{{ String(index + 1).padStart(2, '0') }}</span>
+          <button type="button" class="action-summary" @click="openEditor(item.id, $event)">
+            <span>
+              <strong>
+                {{ item.name }}
+                <em v-if="item.confirmationStatus === 'pending'" class="pending-badge">待确认</em>
+              </strong>
+              <small>{{ item.sets.value ?? '—' }} 组 · 每组 {{ actionTarget(item) }} · 休息 {{ item.restSeconds.value ?? '—' }} 秒</small>
+            </span>
+            <b aria-hidden="true">›</b>
+          </button>
+          <div class="order-controls" aria-label="调整动作顺序">
+            <button type="button" aria-label="上移" :disabled="index === 0" @click="draft.move(item.id, -1)">↑</button>
+            <button type="button" aria-label="下移" :disabled="index === draft.items.length - 1" @click="draft.move(item.id, 1)">↓</button>
+          </div>
+
+          <div v-if="item.sourceRef" class="source-shortcut">
+            <span>{{ sourceLabel(item) }}</span>
+            <a
+              v-if="originalUrl(item)"
+              class="original-video-link"
+              :href="originalUrl(item)"
+              target="_blank"
+              rel="noopener noreferrer"
+            >查看原视频</a>
+            <button
+              v-else-if="isLocalSource(item)"
+              type="button"
+              class="local-preview-button"
+              @click="openEditorWithPreview(item, $event)"
+            >
+              预览来源视频
             </button>
           </div>
-        </form>
+
+          <div
+            v-if="validationIssuesForItem(item.id).length"
+            :id="validationId(item.id)"
+            class="card-validation"
+            role="alert"
+          >
+            <strong>请检查这个动作</strong>
+            <p v-for="issue in validationIssuesForItem(item.id)" :key="`${issue.itemId}-${issue.field}`">
+              {{ issue.message }}
+            </p>
+          </div>
+        </article>
       </section>
-    </section>
 
-    <section v-if="operationError" class="operation-error" role="alert">
-      <span>{{ operationError.message }}</span>
-      <button
-        type="button"
-        :aria-label="operationError.action === 'save_as' ? '重试另存为' : '重试开始训练'"
-        :disabled="operationError.action === 'save_as' ? savingPlan : starting"
-        @click="retryOperation"
+      <section v-else class="empty-plan tp-card">
+        <span>00</span>
+        <h2>还没有训练动作</h2>
+        <p>可以重新选择视频，也可以直接创建一个没有参考视频的动作。</p>
+        <button type="button" :disabled="quickPlanPending" @click="useQuickPlan">
+          {{ quickPlanPending ? '正在载入…' : '使用快速体验方案' }}
+        </button>
+        <small>这是产品示例，不是 AI 分析结果。</small>
+        <p v-if="quickPlanError" class="empty-plan-error" role="alert">{{ quickPlanError }}</p>
+      </section>
+
+      <section class="plan-tools" aria-label="方案次级操作">
+        <button v-if="!showManual" type="button" class="manual-trigger" @click="showManual = true">
+          <span aria-hidden="true">＋</span>
+          <span><strong>创建动作</strong><small>没有参考视频也可以</small></span>
+        </button>
+        <form v-else class="manual-form tp-card" @submit.prevent="addManual">
+          <div>
+            <p class="tp-kicker">MANUAL ACTION</p>
+            <h2>创建自建动作</h2>
+          </div>
+          <label>
+            动作名称
+            <input v-model="manualName" autofocus placeholder="例如：平板支撑" />
+          </label>
+          <div class="mode-toggle">
+            <button type="button" :class="{ active: manualMode === 'reps' }" @click="manualMode = 'reps'">按次数</button>
+            <button type="button" :class="{ active: manualMode === 'duration' }" @click="manualMode = 'duration'">按时长</button>
+          </div>
+          <div class="manual-actions">
+            <button type="button" @click="showManual = false">取消</button>
+            <button type="submit" class="confirm" :disabled="!manualName.trim()">加入方案</button>
+          </div>
+        </form>
+
+        <section v-if="draft.items.length" class="save-as-panel">
+          <button v-if="!showSaveAs" type="button" @click="beginSaveAs">复制方案</button>
+          <form v-else @submit.prevent="saveAs">
+            <label>
+              新方案名称
+              <input v-model="saveAsName" aria-label="新方案名称" autofocus maxlength="40" />
+            </label>
+            <div>
+              <button type="button" @click="showSaveAs = false">取消</button>
+              <button type="submit" class="confirm" :disabled="!saveAsName.trim() || savingPlan">
+                {{ savingPlan ? '创建中…' : '创建副本' }}
+              </button>
+            </div>
+          </form>
+        </section>
+      </section>
+
+      <section v-if="operationError" class="operation-error" role="alert">
+        <span>{{ operationError.message }}</span>
+        <button
+          type="button"
+          :aria-label="operationError.action === 'save_as' ? '重试复制方案' : '重试开始训练'"
+          :disabled="operationError.action === 'save_as' ? savingPlan : starting"
+          @click="retryOperation"
+        >
+          重试
+        </button>
+      </section>
+
+      <span
+        class="save-state"
+        :class="{ failed: draft.persistState === 'failed' }"
+        :role="draft.persistState === 'failed' ? 'alert' : 'status'"
+        aria-live="polite"
       >
-        重试
-      </button>
-    </section>
+        <i />
+        <button v-if="draft.persistState === 'failed'" type="button" aria-label="重试保存当前方案" @click="draft.retryPersist">
+          {{ draft.persistMessage }}
+        </button>
+        <template v-else>
+          {{ draft.persistMessage }}
+          <small v-if="draft.plan.linkedPlanId">· 修改会更新方案库中的这份方案</small>
+        </template>
+      </span>
 
-    <span
-      class="save-state"
-      :class="{ failed: draft.persistState === 'failed' }"
-      :role="draft.persistState === 'failed' ? 'alert' : 'status'"
-      aria-live="polite"
-    >
-      <i />
-      <button v-if="draft.persistState === 'failed'" type="button" aria-label="重试保存当前方案" @click="draft.retryPersist">
-        {{ draft.persistMessage }}
-      </button>
-      <template v-else>
-        {{ draft.persistMessage }}
-        <small v-if="draft.plan.linkedPlanId">· 修改会同步到当前已存方案</small>
-      </template>
-    </span>
+      <section v-if="globalValidationIssues.length" class="plan-error" role="alert">
+        <strong>方案还不能开始训练</strong>
+        <p v-for="issue in globalValidationIssues" :key="`${issue.itemId}-${issue.field}`">{{ issue.message }}</p>
+      </section>
 
-    <section v-if="globalValidationIssues.length" class="plan-error" role="alert">
-      <strong>方案还不能开始训练</strong>
-      <p v-for="issue in globalValidationIssues" :key="`${issue.itemId}-${issue.field}`">{{ issue.message }}</p>
-    </section>
-
-    <section v-if="draft.items.length || training.hasCurrent" class="start-training-panel">
-      <div>
-        <strong>{{ training.hasCurrent ? '已有未完成训练' : `${confirmedItems.length} 个可训练动作 · 约 ${estimatedMinutes || '—'} 分钟` }}</strong>
-        <small class="training-safety-tip">
-          {{ pendingCount ? `${pendingCount} 个待确认动作暂不执行 · ` : '' }}如有不适请停止，并按自身情况调整
-        </small>
-      </div>
-      <button v-if="!training.hasCurrent" type="button" :disabled="starting || !confirmedItems.length" @click="startTraining">
-        {{ starting ? '正在准备…' : '开始训练' }}
-      </button>
-      <RouterLink v-else to="/training">继续训练</RouterLink>
-    </section>
+      <section v-if="draft.items.length || training.hasCurrent" class="start-training-panel">
+        <div>
+          <strong>{{ training.hasCurrent ? '已有未完成训练' : `${confirmedItems.length} 个可训练动作 · 约 ${estimatedMinutes || '—'} 分钟` }}</strong>
+          <small class="training-safety-tip">
+            {{ pendingCount ? `${pendingCount} 个待确认动作暂不执行 · ` : '' }}如有不适请停止，并按自身情况调整
+          </small>
+        </div>
+        <button v-if="!training.hasCurrent" type="button" :disabled="starting || !confirmedItems.length" @click="startTraining">
+          {{ starting ? '正在准备…' : '开始训练' }}
+        </button>
+        <RouterLink v-else to="/training">继续训练</RouterLink>
+      </section>
+    </div>
 
     <template v-if="selectedItem">
       <button class="sheet-backdrop" type="button" aria-label="关闭动作编辑" @click="closeEditor" />
