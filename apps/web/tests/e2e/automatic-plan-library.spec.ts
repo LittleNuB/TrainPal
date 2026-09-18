@@ -1,6 +1,39 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 
+test('pending library writes prevent leaving for an editable draft', async ({ page }) => {
+  page.on('dialog', dialog => dialog.accept())
+  await page.goto('/train')
+  await page.getByRole('button', { name: '使用快速体验方案' }).click()
+  await page.getByRole('link', { name: '返回首页', exact: true }).click()
+  await page.locator('a[href="/train"]').click()
+  await page.evaluate(() => {
+    Reflect.set(window, '__holdDraftWrite', true)
+    const put = IDBObjectStore.prototype.put
+    IDBObjectStore.prototype.put = function (...args) {
+      const result = put.apply(this, args)
+      if (this.name === 'drafts') {
+        Reflect.set(window, '__draftWriteStarted', true)
+        const keepOpen = () => {
+          if (Reflect.get(window, '__holdDraftWrite')) this.count().onsuccess = keepOpen
+        }
+        keepOpen()
+      }
+      return result
+    }
+  })
+  try {
+    await page.getByRole('button', { name: '新建方案', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => Reflect.get(window, '__draftWriteStarted'))).toBe(true)
+    await page.getByRole('link', { name: '检查并开始', exact: true }).click()
+    await expect(page).toHaveURL(new RegExp('/train$'))
+  } finally {
+    await page.evaluate(() => Reflect.set(window, '__holdDraftWrite', false))
+  }
+  await expect(page).toHaveURL(new RegExp('/plan$'))
+  await expect(page.getByRole('button', { name: /创建动作/ })).toBeVisible()
+})
+
 for (const width of [320, 1440]) {
   test(`populated plan library remains usable at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
