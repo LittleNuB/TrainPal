@@ -52,7 +52,7 @@ const save = (): void => emit('save', {
 <template>
   <section class="profile-step">
     <div class="profile-intro">
-      <p class="tp-kicker">OPTIONAL PROFILE</p>
+      <p class="tp-kicker">训练档案 · 可选</p>
       <h1 class="tp-title">完善训练档案</h1>
       <p>可跳过，不影响测评结果</p>
     </div>
@@ -178,4 +178,5 @@ const save = (): void => emit('save', {
 @media (min-width: 360px) {
   .profile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+@media (min-width: 1024px) { .profile-actions { left: calc(var(--tp-sidebar-width, 216px) + 24px); } }
 </style>

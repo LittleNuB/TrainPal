@@ -179,7 +179,7 @@ describe('视频动作分析页', () => {
     await flushPromises()
     expect(draft.items.map((item) => item.name)).toEqual(['已有动作'])
     expect(document.activeElement).toBe(wrapper.get('.append-option').element)
-    expect(wrapper.get('.proposal-dialog').text()).toContain('不会静默覆盖')
+    expect(wrapper.get('.proposal-dialog').text()).toContain('要加入当前方案，还是替换它')
 
     await wrapper.get('.append-option').trigger('click')
     await flushPromises()

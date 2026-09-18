@@ -9,12 +9,10 @@ test('visitor can install the labelled quick plan from the training hub', async 
 
   await expect(page).toHaveURL(/\/plan$/)
   await expect(page.getByLabel('方案名称')).toHaveValue('8 分钟手臂唤醒')
-  await expect(page.getByText('这个方案不是 AI 分析结果')).toBeVisible()
+  await expect(page.getByText('这些示例不是 AI 分析结果', { exact: false })).toBeVisible()
 
   const firstAction = page.locator('.plan-card').first()
   const summaryControls = [
-    firstAction.getByRole('button', { name: '上移' }),
-    firstAction.getByRole('button', { name: '下移' }),
     firstAction.locator('.action-summary'),
   ]
   for (const control of summaryControls) {
@@ -28,6 +26,8 @@ test('visitor can install the labelled quick plan from the training hub', async 
   await firstAction.locator('.action-summary').click()
   const sheet = page.locator('.action-sheet')
   const detailControls = [
+    sheet.getByRole('button', { name: '上移' }),
+    sheet.getByRole('button', { name: '下移' }),
     sheet.getByRole('button', { name: '按次数' }),
     sheet.getByRole('button', { name: '按时长' }),
     sheet.getByRole('button', { name: '复制动作' }),

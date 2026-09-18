@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { analysisClient, browserEventStreamFactory } from '@/api/client'
 import {
   localMediaAsFile,
+  effectiveLocalUploadMaxBytes,
   probeVideoDuration,
   validateLocalMediaFile,
   validateLocalMediaUpload,
@@ -70,7 +71,7 @@ const capabilityCopy = computed(() => {
   if (analysis.capabilitiesLoading) return '正在读取当前分析能力…'
   if (!capability) return '暂时无法确认本地视频能力'
   if (!capability.local_upload_enabled) return '当前环境暂不支持本地视频分析'
-  return `最长 ${formatDurationLimit(capability.local_analysis_max_seconds)} · 建议不超过 19 MB · 结果需要核对`
+  return `最长 ${formatDurationLimit(capability.local_analysis_max_seconds)} · 最大 ${formatSize(effectiveLocalUploadMaxBytes(capability))} · 结果需要核对`
 })
 
 const initialize = async (): Promise<void> => {
@@ -189,27 +190,13 @@ onMounted(initialize)
 <template>
   <main class="tp-page home-page">
     <header class="home-hero">
-      <div class="brand-row">
-        <span class="brand-stamp" aria-hidden="true">TP</span>
-        <p class="tp-kicker">TRAINPAL · 训练搭子</p>
-      </div>
-      <h1 class="tp-title">刷到的动作，<br>变成今天的训练。</h1>
-      <p class="tp-lead">选择一条你想练的视频。TrainPal 会拆出动作、保留原片段，再把它整理成可以直接开始的训练。</p>
-      <ul class="hero-signals" aria-label="TrainPal 核心特点">
-        <li>本地视频优先</li>
-        <li>动作可校正</li>
-        <li>同设备继续训练</li>
-      </ul>
+      <div class="brand-row">TrainPal</div>
+      <h1 class="tp-title">把想练的视频，<br>变成你的训练。</h1>
+      <p class="tp-lead">选择视频，整理动作，再按自己的节奏练。</p>
     </header>
 
     <section class="import-workspace" aria-labelledby="import-title">
-      <div class="workspace-heading">
-        <span>01</span>
-        <div>
-          <p class="tp-kicker">SELECT A VIDEO</p>
-          <h2 id="import-title">从一个视频开始</h2>
-        </div>
-      </div>
+      <h2 id="import-title" class="tp-visually-hidden">从一个视频开始</h2>
 
       <div v-if="current && previewUrl" class="video-ticket tp-card">
         <video :src="previewUrl" controls preload="metadata" aria-label="已选择的视频预览" />
@@ -233,8 +220,10 @@ onMounted(initialize)
           :disabled="initializing || importing"
           @change="chooseFile"
         >
-        <span aria-hidden="true">{{ current ? '↻' : '+' }}</span>
+        <svg v-if="!current" class="upload-icon" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="12" y="8" width="40" height="48" rx="5" /><path d="M20 8v48M44 8v48M12 19h8m-8 13h8m-8 13h8m24-26h8m-8 13h8m-8 13h8M26 32l6-6 6 6m-6-6v17" /></svg>
+        <span v-else aria-hidden="true">↻</span>
         <b>{{ importing ? '正在读取视频…' : current ? '更换视频' : '选择健身视频' }}</b>
+        <small v-if="!current">选择你有权使用的视频</small>
       </label>
 
       <p class="capability-copy">{{ capabilityCopy }} · 原视频保存在当前设备；服务端临时副本只用于本次分析</p>
@@ -264,66 +253,12 @@ onMounted(initialize)
       </button>
     </section>
 
-    <section class="product-story" aria-labelledby="product-story-title">
-      <div class="story-heading">
-        <p class="tp-kicker">FROM VIDEO TO MOVEMENT</p>
-        <h2 id="product-story-title">不是看完一条视频，<br>而是完成一次训练。</h2>
-        <p>TrainPal 把“收藏了但没练”的内容，变成一条由你确认、调整和完成的训练路径。无论接口是否可用，这条产品路径都清楚可见。</p>
-      </div>
-
-      <ol class="journey-board">
-        <li>
-          <span>01</span>
-          <div>
-            <strong>带来你的参考</strong>
-            <p>从当前设备选择自己有权使用的健身视频；不读取平台 Cookie，也不抓取任意链接。</p>
-          </div>
-        </li>
-        <li>
-          <span>02</span>
-          <div>
-            <strong>理解动作与出处</strong>
-            <p>分析结果保留可回看的来源片段。它是候选与证据，不是不可修改的黑箱答案。</p>
-          </div>
-        </li>
-        <li>
-          <span>03</span>
-          <div>
-            <strong>进入你的训练节奏</strong>
-            <p>确认方案后，在训练、休息和结果回顾中由同一位猫教练持续陪伴。</p>
-          </div>
-        </li>
-      </ol>
-    </section>
-
-    <section class="portfolio-proof" aria-labelledby="portfolio-proof-title">
-      <div class="proof-copy">
-        <p class="tp-kicker">DESIGNED FOR TRUST</p>
-        <h2 id="portfolio-proof-title">每个关键判断，<br>都留给训练的人。</h2>
-      </div>
-      <dl class="proof-grid">
-        <div>
-          <dt>来源</dt>
-          <dd>本地设备保留原视频，服务端只处理临时副本。</dd>
-        </div>
-        <div>
-          <dt>结果</dt>
-          <dd>动作、组数和时长都可以在开始训练前确认与调整。</dd>
-        </div>
-        <div>
-          <dt>连续性</dt>
-          <dd>方案和训练进度保存在当前设备，可在离开后继续。</dd>
-        </div>
-      </dl>
-    </section>
-
-    <section
+    <details
       v-if="quickRealSources.length"
       class="quick-real-section"
-      aria-labelledby="quick-real-title"
     >
-      <div class="section-line"><span>02</span><h2 id="quick-real-title">快速真实分析</h2></div>
-      <p>选一段已授权视频，体验真实 AI 动作理解。分析需要几分钟，结果需要核对。</p>
+      <summary><span aria-hidden="true">▷</span>先用示例视频试试<span class="summary-chevron" aria-hidden="true">⌄</span></summary>
+      <p>选择一段已授权视频开始 AI 分析，结果需要核对。</p>
       <div class="quick-real-sources" aria-label="按时长排序的真实分析来源">
         <button
           v-for="source in quickRealSources"
@@ -336,10 +271,10 @@ onMounted(initialize)
           {{ formatRoundedDuration(source.duration_seconds) }}
         </button>
       </div>
-    </section>
+    </details>
 
     <section v-if="draft.items.length || library.plans.length" class="recent-section" aria-labelledby="recent-title">
-      <div class="section-line"><span>03</span><h2 id="recent-title">接着上次</h2></div>
+      <div class="section-line"><h2 id="recent-title">继续编辑上次的方案</h2></div>
       <div class="recent-links">
         <RouterLink v-if="draft.items.length" to="/plan">
           <span><small>当前方案</small><b>{{ draft.plan.name }}</b></span>
@@ -369,7 +304,7 @@ onMounted(initialize)
         tabindex="-1"
         @keydown="quickRealDialogFocus.onKeydown($event, closeQuickRealAnalysis)"
       >
-        <p class="tp-kicker">REAL ANALYSIS</p>
+        <p class="tp-kicker">示例视频</p>
         <h2 id="quick-real-dialog-title">开始真实 AI 分析？</h2>
         <p id="quick-real-dialog-description">
           这段视频约 {{ formatRoundedMinutes(quickRealSource.duration_seconds) }} 分钟。分析会调用真实 AI，需要等待几分钟；结果需要核对，你可以编辑或删除不准确的动作。
@@ -398,14 +333,11 @@ onMounted(initialize)
 </template>
 
 <style scoped>
-.home-page { display: grid; align-content: start; gap: 32px; }
-.home-hero { display: grid; gap: 18px; padding-top: 8px; }
-.brand-row { display: flex; align-items: center; gap: 10px; }
-.brand-stamp { display: grid; width: 42px; height: 42px; place-items: center; border: 2px solid var(--tp-ink); border-radius: 50%; color: var(--tp-surface); background: var(--tp-ink); font: 700 15px/1 var(--font-display); letter-spacing: .08em; }
+.home-page { display: grid; max-width: 1000px; align-content: start; gap: 24px; }
+.home-hero { display: grid; gap: 14px; padding-top: 4px; }
+.brand-row { margin-bottom: 10px; font: 600 26px/1.3 var(--font-brand); }
 .home-hero .tp-title { max-width: 650px; }
 .home-hero .tp-lead { max-width: 590px; }
-.hero-signals { display: flex; flex-wrap: wrap; gap: 7px; margin: 0; padding: 0; list-style: none; }
-.hero-signals li { padding: 7px 10px; border: 1px solid var(--tp-line); border-radius: 999px; color: var(--tp-muted); background: rgb(255 253 248 / 64%); font-size: 11px; font-weight: 800; }
 
 .import-workspace { display: grid; gap: 14px; }
 .workspace-heading { display: flex; align-items: end; gap: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--tp-line); }
@@ -415,7 +347,7 @@ onMounted(initialize)
 .section-line h2 { margin: 3px 0 0; color: var(--tp-ink); font: 700 28px/1 var(--font-display), var(--font-cn); }
 
 .video-ticket { overflow: hidden; }
-.video-ticket video { display: block; width: 100%; max-height: min(46dvh, 430px); aspect-ratio: 4 / 3; object-fit: contain; background: var(--tp-training-canvas); }
+.video-ticket video { display: block; width: 100%; max-height: min(46dvh, 430px); aspect-ratio: 4 / 3; object-fit: contain; background: var(--tp-media-canvas); }
 .ticket-copy { display: grid; gap: 13px; padding: 15px 16px; }
 .ticket-copy > div { display: grid; gap: 3px; min-width: 0; }
 .ticket-copy small { color: var(--tp-primary-readable); font: 700 11px/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; }
@@ -425,10 +357,14 @@ onMounted(initialize)
 .ticket-copy dt { color: var(--tp-muted); font-size: 12px; }
 .ticket-copy dd { margin: 0; color: var(--tp-ink); font: 700 13px/1.4 var(--font-display); }
 
-.file-picker { display: flex; min-height: 68px; align-items: center; justify-content: center; gap: 12px; border: 1px solid var(--tp-ink); border-radius: var(--tp-radius-md); color: var(--tp-surface); background: var(--tp-ink); }
+.file-picker { display: flex; min-height: 244px; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 28px 24px; border: 1px solid #CBD0BC; border-radius: 18px; color: var(--tp-secondary); background: var(--tp-sage-surface); cursor: pointer; }
+.upload-icon { width: 68px; height: 68px; }
+.file-picker b { display: grid; width: 100%; max-width: 340px; min-height: 48px; place-items: center; border-radius: 12px; color: var(--tp-surface); background: var(--tp-primary-readable); font-size: 15px; font-weight: 600; }
+.file-picker small { color: var(--tp-muted); font-size: 12px; }
 .file-picker:focus-within { outline: 2px solid var(--tp-focus); outline-offset: 3px; }
 .file-picker > span { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid rgb(255 253 248 / 35%); border-radius: 50%; font-size: 22px; }
-.file-picker--secondary { min-height: 50px; border-color: var(--tp-line); color: var(--tp-ink); background: transparent; }
+.file-picker--secondary { min-height: 50px; flex-direction: row; padding: 0 12px; border-color: var(--tp-line); color: var(--tp-ink); background: transparent; }
+.file-picker--secondary b { width: auto; color: var(--tp-ink); background: transparent; }
 .file-picker--secondary > span { border-color: var(--tp-line); font-size: 18px; }
 .capability-copy { margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.6; }
 .form-error { margin: 0; color: var(--tp-danger); font-size: 13px; line-height: 1.5; }
@@ -437,27 +373,13 @@ onMounted(initialize)
 .start-analysis span { margin-left: auto; font-size: 20px; }
 .retry-capability { justify-self: center; }
 
-.product-story { display: grid; gap: 20px; padding: 24px; border: 1px solid var(--tp-ink); border-radius: var(--tp-radius-lg); color: var(--tp-training-ink); background: var(--tp-ink); box-shadow: var(--tp-shadow-float); }
-.story-heading { display: grid; gap: 11px; }
-.story-heading .tp-kicker { color: var(--tp-secondary); }
-.story-heading h2,
-.proof-copy h2 { margin: 0; font: 700 clamp(32px, 8vw, 48px)/.96 var(--font-display), var(--font-cn); letter-spacing: -.02em; }
-.story-heading > p:last-child { max-width: 590px; margin: 0; color: #D4D9D3; font-size: 13px; line-height: 1.7; }
-.journey-board { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; border-top: 1px solid rgb(247 243 233 / 20%); }
-.journey-board li { display: grid; grid-template-columns: 42px 1fr; gap: 12px; padding: 15px 0; border-bottom: 1px solid rgb(247 243 233 / 20%); }
-.journey-board li > span { color: var(--tp-secondary); font: 700 22px/1 var(--font-display); }
-.journey-board li > div { display: grid; gap: 5px; }
-.journey-board strong { color: var(--tp-training-ink); font-size: 14px; }
-.journey-board p { margin: 0; color: #BAC3BB; font-size: 12px; line-height: 1.6; }
-
-.portfolio-proof { display: grid; gap: 20px; padding: 2px 0 6px; }
-.proof-copy { display: grid; gap: 10px; }
-.proof-grid { display: grid; gap: 9px; margin: 0; }
-.proof-grid div { min-height: 114px; padding: 16px; border: 1px solid var(--tp-line); border-radius: 18px; background: rgb(255 253 248 / 72%); }
-.proof-grid dt { margin-bottom: 22px; color: var(--tp-primary-readable); font: 700 12px/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; }
-.proof-grid dd { margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.65; }
-
-.quick-real-section { display: grid; gap: 13px; padding-top: 4px; }
+.quick-real-section { padding: 0 16px; border: 1px solid var(--tp-line); border-radius: 12px; background: var(--tp-surface); }
+.quick-real-section summary { display: flex; min-height: 64px; align-items: center; gap: 12px; font-size: 14px; font-weight: 500; cursor: pointer; list-style: none; }
+.quick-real-section summary::-webkit-details-marker { display: none; }
+.summary-chevron { margin-left: auto; color: var(--tp-muted); }
+.quick-real-section[open] { padding-bottom: 16px; }
+.quick-real-section[open] .summary-chevron { transform: rotate(180deg); }
+.quick-real-section .quick-real-sources { margin-top: 12px; }
 .quick-real-section > p { margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.6; }
 .quick-real-sources { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
 .quick-real-source { min-height: 48px; border: 1px solid var(--tp-line); border-radius: 14px; color: var(--tp-ink); background: var(--tp-surface); font: 700 16px/1 var(--font-display); }
@@ -481,11 +403,21 @@ onMounted(initialize)
 .recent-links strong { color: var(--tp-primary-readable); font: 700 14px/1 var(--font-display); }
 
 @media (min-width: 768px) {
-  .home-page { gap: 42px; }
+  .home-page { gap: 26px; }
   .ticket-copy { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
   .quick-real-sources { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  .product-story { padding: 32px; }
-  .proof-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1024px) {
+  .home-page { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); column-gap: 48px; padding-top: 72px; }
+  .home-hero { grid-column: 1; align-content: start; padding-top: 24px; }
+  .brand-row { display: none; }
+  .home-hero .tp-title { font-size: clamp(28px, 3vw, 38px); line-height: 1.5; }
+  .import-workspace { grid-column: 2; grid-row: 1 / span 3; align-content: start; }
+  .file-picker { min-height: 320px; }
+  .file-picker--secondary { min-height: 50px; }
+  .quick-real-section, .recent-section { grid-column: 1; }
+  .section-line h2 { font-size: 16px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

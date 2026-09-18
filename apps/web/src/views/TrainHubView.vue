@@ -120,22 +120,19 @@ onMounted(async () => {
   <main class="train-hub tp-page">
     <header class="hub-heading">
       <div>
-        <p class="tp-kicker">TODAY WITH TRAINPAL</p>
         <h1 class="tp-title">训练</h1>
+        <p class="tp-lead">你的方案都在这里，随时接着调整或开练。</p>
       </div>
-      <div class="day-stamp" aria-label="今天">
-        <span>今天</span>
-        <b>{{ new Date().getDate() }}</b>
-      </div>
+      <RouterLink class="tp-secondary-action" to="/">导入新视频</RouterLink>
     </header>
 
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
     <p v-if="pending" class="notice" role="status">正在保存方案，请稍候…</p>
 
     <section v-if="training.hasCurrent" class="focus-card session-card tp-card">
-      <p class="tp-kicker">CONTINUE</p>
+      <p class="tp-kicker">接着上次练</p>
       <h2>{{ training.session?.plan.name }}</h2>
-      <p>训练进度已经留在本机。回来后仍由你决定何时开始下一组。</p>
+      <p>进度已保存，准备好再继续。</p>
       <div class="focus-stats">
         <span><b>{{ (training.session?.currentItemIndex ?? 0) + 1 }}</b> / {{ training.session?.plan.items.length ?? 0 }} 动作</span>
         <span>{{ training.session?.status === 'resting' ? '休息中' : '等待继续' }}</span>
@@ -144,22 +141,21 @@ onMounted(async () => {
     </section>
 
     <section v-else-if="draft.items.length" class="focus-card current-plan tp-card">
-      <p class="tp-kicker">CURRENT PLAN</p>
+      <p class="tp-kicker">继续准备</p>
       <h2>{{ draft.plan.name }}</h2>
-      <p>开始前，可以修改动作、组数和休息时间。</p>
+      <p>方案已保存在本机。开始前，可以修改动作、组数和休息时间。</p>
       <div class="focus-stats">
         <span><b>{{ draft.items.length }}</b> 个动作</span>
         <span>约 {{ currentPlanMinutes || '—' }} 分钟</span>
       </div>
-      <RouterLink class="tp-primary-action" to="/plan">检查并开始</RouterLink>
+      <RouterLink class="tp-primary-action" to="/plan">查看方案</RouterLink>
     </section>
 
     <section v-else class="focus-card empty-focus tp-card">
-      <div class="empty-mark" aria-hidden="true">TP</div>
-      <p class="tp-kicker">READY WHEN YOU ARE</p>
       <h2>先准备一场想练的训练</h2>
-      <p>从首页导入自己的视频，或用清楚标记的体验方案走通训练闭环。</p>
-      <button class="tp-primary-action" type="button" :disabled="pending" @click="useQuickPlan">
+      <p>从一个健身视频开始，把想练的动作整理成自己的方案。</p>
+      <RouterLink class="tp-primary-action" to="/">选择健身视频</RouterLink>
+      <button class="tp-quiet-action quick-plan-entry" type="button" :disabled="pending" @click="useQuickPlan">
         {{ pending ? '正在准备…' : '使用快速体验方案' }}
       </button>
       <small>{{ QUICK_EXPERIENCE_LABEL }}不是 AI 分析结果。</small>
@@ -170,9 +166,8 @@ onMounted(async () => {
         <div>
           <h2>方案库 <span class="plan-count">{{ library.plans.length }}</span></h2>
         </div>
-        <button class="new-plan" type="button" :disabled="pending" @click="createPlan">新建方案</button>
+        <button class="tp-secondary-action" type="button" :disabled="pending" @click="createPlan">新建方案</button>
       </div>
-
       <p class="library-note">方案自动保存，仅此浏览器可用；清除浏览器数据会丢失。</p>
 
       <div v-if="library.plans.length" class="saved-list">
@@ -197,7 +192,7 @@ onMounted(async () => {
         {{ showAllPlans ? '收起方案' : `查看全部 ${library.plans.length} 个方案` }}
       </button>
       <div v-if="!library.plans.length" class="saved-empty">
-        <p>进入编辑的非空方案会自动保存在这里。</p>
+        <p>进入编辑的方案会自动保存在这里，无需另行收藏。仅此浏览器可用。</p>
         <RouterLink to="/">去导入视频</RouterLink>
       </div>
     </section>
@@ -214,19 +209,18 @@ onMounted(async () => {
 .notice { margin: 0; padding: 11px 13px; border-left: 3px solid var(--tp-secondary); border-radius: 0 10px 10px 0; color: var(--tp-success); background: rgb(165 186 99 / 12%); font-size: 12px; }
 
 .focus-card { position: relative; display: grid; gap: 12px; overflow: hidden; padding: clamp(22px, 6vw, 34px); }
-.focus-card::after { position: absolute; right: -46px; bottom: -65px; width: 170px; height: 170px; border: 24px solid rgb(165 186 99 / 18%); border-radius: 50%; content: ''; }
 .focus-card > * { position: relative; z-index: 1; }
-.focus-card h2 { max-width: 520px; margin: 0; font: 700 clamp(32px, 9vw, 48px)/.95 var(--font-display), var(--font-cn); }
+.focus-card h2 { max-width: 520px; margin: 0; font: 600 clamp(22px, 5vw, 30px)/1.4 var(--font-cn); }
 .focus-card > p:not(.tp-kicker) { max-width: 520px; margin: 0; color: var(--tp-muted); font-size: 13px; line-height: 1.7; }
 .focus-card .tp-primary-action { justify-self: start; margin-top: 4px; }
 .focus-stats { display: flex; flex-wrap: wrap; gap: 18px; color: var(--tp-muted); font-size: 12px; }
 .focus-stats b { margin-right: 3px; color: var(--tp-ink); font: 700 24px/1 var(--font-display); }
 .session-card { color: var(--tp-training-ink); border-color: transparent; background: var(--tp-training-surface); }
-.session-card .tp-kicker { color: var(--tp-secondary); }
+.session-card .tp-kicker { color: var(--tp-muted); }
 .session-card h2,
 .session-card .focus-stats b { color: var(--tp-training-ink); }
 .session-card > p:not(.tp-kicker),
-.session-card .focus-stats { color: #B9C0BB; }
+.session-card .focus-stats { color: var(--tp-muted); }
 .session-card::after { border-color: rgb(217 75 43 / 25%); }
 .empty-mark { display: grid; width: 52px; height: 52px; place-items: center; border-radius: 20px 20px 20px 6px; color: var(--tp-ink); background: var(--tp-secondary); font: 800 20px/1 var(--font-display); transform: rotate(-3deg); }
 .empty-focus small { color: var(--tp-muted); font-size: 11px; }
@@ -235,7 +229,7 @@ onMounted(async () => {
 .section-title { display: flex; align-items: end; justify-content: space-between; }
 .section-title h2 { margin: 5px 0 0; font-size: 24px; }
 .plan-count { margin-left: 6px; color: var(--tp-muted); font-size: 15px; font-weight: 400; }
-.new-plan { min-height: 44px; padding: 8px 14px; border: 1px solid var(--tp-line); border-radius: 24px; color: var(--tp-ink); background: var(--tp-surface); font-size: 13px; }
+.section-title .tp-secondary-action { min-height: 44px; padding-inline: 14px; font-size: 12px; }
 .library-note { margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.6; }
 .section-title > b { color: var(--tp-muted); font: 700 34px/1 var(--font-display); }
 .saved-list { display: grid; overflow: hidden; border: 1px solid var(--tp-line); border-radius: 18px; background: var(--tp-surface); }
@@ -253,4 +247,19 @@ onMounted(async () => {
 .saved-empty { display: flex; min-height: 88px; align-items: center; justify-content: space-between; gap: 14px; padding: 16px; border: 1px dashed #BDB9AC; border-radius: 18px; }
 .saved-empty p { margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.6; }
 .saved-empty a { min-height: 44px; color: var(--tp-primary-readable); font-size: 12px; font-weight: 800; white-space: nowrap; }
+.current-plan, .session-card { background: var(--tp-sage-surface); }
+.hub-heading .tp-secondary-action { min-height: 44px; padding-inline: 14px; font-size: 12px; white-space: nowrap; }
+.hub-heading .tp-lead { margin-top: 8px; font-size: 13px; }
+.quick-plan-entry { justify-self: start; padding: 0; font-size: 12px; }
+.saved-empty { border-style: solid; background: var(--tp-surface); }
+@media (min-width: 1024px) {
+  .train-hub { padding: 48px; gap: 32px; }
+  .saved-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; overflow: visible; border: 0; background: transparent; }
+  .saved-row, .saved-row:first-child { min-width: 0; min-height: 150px; border: 1px solid var(--tp-line); border-radius: 14px; background: var(--tp-surface); }
+  .plan-open { flex-direction: column; align-items: start; justify-content: center; gap: 18px; padding: 24px; }
+  .plan-delete { border-left: 0; align-self: end; min-height: 44px; }
+  .focus-card { grid-template-columns: 1fr auto; }
+  .focus-card > * { grid-column: 1; }
+  .focus-card .tp-primary-action { grid-column: 2; grid-row: 2 / span 2; align-self: center; }
+}
 </style>

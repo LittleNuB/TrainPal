@@ -53,7 +53,7 @@ test('quick plan completes through save-as, rest recovery, TrainPal, record, and
   await expect(page.getByText('组间休息', { exact: true }).first()).toBeVisible({ timeout: 5_000 })
 
   await page.getByRole('link', { name: '返回方案' }).click()
-  await page.getByRole('link', { name: '返回首页' }).click()
+  await page.getByRole('link', { name: '返回训练' }).click()
   await page.getByRole('navigation', { name: '主要导航' }).getByRole('link', { name: '训练', exact: true }).click()
   await expect(page.getByRole('link', { name: '继续训练', exact: true })).toBeVisible()
   await page.reload()

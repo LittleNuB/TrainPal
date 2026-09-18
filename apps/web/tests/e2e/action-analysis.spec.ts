@@ -17,7 +17,7 @@ test('video result becomes a base plan, resolves uncertainty, and restores from 
   })
 
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: /刷到的动作/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /把想练的视频/ })).toBeVisible()
 
   const primaryNavigation = page.getByRole('navigation', { name: '主要导航' })
   for (const target of ['首页', '训练', '我的'].map((name) => (
@@ -29,6 +29,7 @@ test('video result becomes a base plan, resolves uncertainty, and restores from 
     expect(box!.height).toBeGreaterThanOrEqual(44)
   }
 
+  await page.locator('.quick-real-section summary').click()
   await page.getByRole('button', { name: '0:02', exact: true }).click()
   await page.getByRole('dialog').getByRole('button', { name: '确认并开始' }).click()
   await expect(page).toHaveURL(/\/analysis$/)
@@ -52,7 +53,9 @@ test('video result becomes a base plan, resolves uncertainty, and restores from 
   await firstConfirmationSheet.getByRole('button', { name: '确认并加入' }).click()
   await expect(firstConfirmationSheet).toBeHidden()
 
-  await page.getByRole('link', { name: '返回首页' }).click()
+  await page.getByRole('link', { name: '返回训练' }).click()
+  await page.getByRole('navigation', { name: '主要导航' }).getByRole('link', { name: '首页', exact: true }).click()
+  await page.locator('.quick-real-section summary').click()
   await page.getByRole('button', { name: '0:03', exact: true }).click()
   await page.getByRole('dialog').getByRole('button', { name: '确认并开始' }).click()
   await expect(page).toHaveURL(/\/analysis$/)

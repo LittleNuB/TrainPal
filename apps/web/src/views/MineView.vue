@@ -133,7 +133,6 @@ onMounted(async () => {
   <main class="mine-page tp-page">
     <header class="mine-hero">
       <div>
-        <p class="tp-kicker">YOUR TRAINPAL</p>
         <h1 class="tp-title">我的</h1>
         <p class="tp-lead">目标、教练和训练资料，只留在当前设备。</p>
       </div>
@@ -150,7 +149,7 @@ onMounted(async () => {
 
     <section class="growth-overview tp-card">
       <div>
-        <p class="tp-kicker">TOGETHER</p>
+        <p class="tp-kicker">陪伴成长</p>
         <h2><b>{{ effectiveTrainingDays }}</b> 个有效训练日</h2>
         <p>完整完成或留下实际完成量，都算一次与你并肩的训练日。</p>
       </div>
@@ -159,33 +158,33 @@ onMounted(async () => {
 
     <section class="settings-list" aria-label="我的 TrainPal 设置">
       <button type="button" class="setting-row" @click="openPanel('gymti', $event)">
-        <span class="row-icon goal-icon" aria-hidden="true">G</span>
+        <span class="row-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="4" /><path d="m12 12 7-7" /></svg></span>
         <span><small>GYMTI 健身目标</small><strong>{{ gymtiStatus }}</strong></span>
         <b>›</b>
       </button>
       <button type="button" class="setting-row" @click="openPanel('coach', $event)">
-        <span class="row-icon coach-icon" aria-hidden="true">C</span>
+        <span class="row-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 9V4l5 3h4l5-3v5a8 8 0 1 1-14 0Z" /><path d="M9 12h.01M15 12h.01m-4 4h2" /></svg></span>
         <span><small>小猫教练风格</small><strong>{{ coachLabel }}</strong></span>
         <b>›</b>
       </button>
       <button type="button" class="setting-row" @click="openPanel('profile', $event)">
-        <span class="row-icon profile-icon" aria-hidden="true">P</span>
+        <span class="row-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M5 21v-2a7 7 0 0 1 14 0v2" /></svg></span>
         <span><small>个人信息 · 可选</small><strong>{{ profileFields ? `已填写 ${profileFields}/4 项` : '尚未填写' }}</strong></span>
         <b>›</b>
       </button>
       <button type="button" class="setting-row" @click="openPanel('records', $event)">
-        <span class="row-icon record-icon" aria-hidden="true">R</span>
+        <span class="row-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2" /><path d="M9 2v4m6-4v4M9 11h6m-6 4h4" /></svg></span>
         <span><small>训练记录</small><strong>{{ library.records.length ? `${library.records.length} 次训练` : '还没有记录' }}</strong></span>
         <b>›</b>
       </button>
       <button type="button" class="setting-row" @click="openPanel('data', $event)">
-        <span class="row-icon data-icon" aria-hidden="true">D</span>
+        <span class="row-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z" /><path d="m8 12 3 3 5-6" /></svg></span>
         <span><small>设置与本机数据</small><strong>隐私、可见性与数据清理</strong></span>
         <b>›</b>
       </button>
     </section>
 
-    <p class="local-only-note">TrainPal 首版不建设账号与跨设备同步；清除浏览器数据后无法恢复。</p>
+    <p class="local-only-note">数据保存在这台设备，不会跨设备同步。清除浏览器数据后无法恢复。</p>
 
     <template v-if="activePanel">
       <button class="sheet-backdrop" type="button" aria-label="关闭详情" @click="closePanel" />
@@ -200,7 +199,7 @@ onMounted(async () => {
       >
         <header>
           <div>
-            <p class="tp-kicker">MY TRAINPAL</p>
+            <p class="tp-kicker">我的 TrainPal</p>
             <h2 :id="`panel-${activePanel}`">
               {{ activePanel === 'records' ? '训练记录' : activePanel === 'gymti' ? 'GYMTI 健身目标' : activePanel === 'profile' ? '个人信息' : activePanel === 'coach' ? '小猫教练风格' : activePanel === 'growth' ? '陪伴成长' : '设置与本机数据' }}
             </h2>
@@ -251,7 +250,7 @@ onMounted(async () => {
         <div v-else-if="activePanel === 'growth'" class="growth-panel">
           <span>{{ effectiveTrainingDays }}</span>
           <h3>一起训练过的日子</h3>
-          <p>成长只奖励有效训练日，不因中断倒退，也不会解锁更激进的训练参数或 Agent 权限。</p>
+          <p>每个认真练过的日子都算数。休息或中断不会让成长倒退，按自己的节奏继续就好。</p>
           <div class="milestone-track" aria-label="下一个里程碑为 3 个有效训练日">
             <i :style="{ width: `${Math.min(effectiveTrainingDays / 3, 1) * 100}%` }" />
           </div>
@@ -286,18 +285,14 @@ onMounted(async () => {
 .growth-overview .tp-kicker { color: var(--tp-secondary); }
 .growth-overview h2 { margin: 7px 0 5px; color: var(--tp-training-ink); font-size: 20px; }
 .growth-overview h2 b { margin-right: 5px; font: 700 38px/1 var(--font-display); }
-.growth-overview p:not(.tp-kicker) { margin: 0; color: #B9C0BB; font-size: 11px; line-height: 1.6; }
+.growth-overview p:not(.tp-kicker) { margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.6; }
 .growth-overview button { width: 44px; min-width: 44px; min-height: 44px; border: 1px solid rgb(247 243 233 / 16%); border-radius: 50%; color: var(--tp-secondary); background: transparent; font-size: 30px; }
 
 .settings-list { display: grid; overflow: hidden; border: 1px solid var(--tp-line); border-radius: 20px; background: var(--tp-surface); box-shadow: var(--tp-shadow-soft); }
 .setting-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) 24px; min-height: 74px; align-items: center; gap: 12px; padding: 12px 14px; border: 0; border-top: 1px solid var(--tp-line); color: var(--tp-ink); background: transparent; text-align: left; }
 .setting-row:first-child { border-top: 0; }
-.row-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 15px 15px 15px 5px; color: var(--tp-ink); font: 800 17px/1 var(--font-display); }
-.goal-icon { background: #F1C894; }
-.coach-icon { background: var(--tp-secondary); }
-.profile-icon { background: #D4C8E5; }
-.record-icon { background: #BFD8D1; }
-.data-icon { background: #D8D5CA; }
+.row-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 12px; color: var(--tp-secondary); background: var(--tp-surface-raised); }
+.row-icon svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .setting-row small,
 .setting-row strong { display: block; }
 .setting-row small { color: var(--tp-muted); font-size: 11px; }
@@ -354,6 +349,16 @@ onMounted(async () => {
 
 @media (min-width: 760px) {
   .detail-sheet { top: 0; right: 0; bottom: 0; left: auto; width: min(520px, 100%); max-height: none; border-radius: 28px 0 0 28px; }
+}
+
+@media (min-width: 1024px) {
+  .mine-page { grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 28px 48px; padding-top: 52px; }
+  .mine-hero { grid-column: 1; align-items: center; }
+  .growth-overview { grid-column: 1; align-self: start; }
+  .settings-list { grid-column: 2; grid-row: 1 / span 3; align-self: start; }
+  .setting-row { min-height: 94px; padding: 18px 22px; }
+  .local-only-note { grid-column: 1; }
+  .notice { grid-column: 1 / -1; }
 }
 
 @media (max-width: 359px) {

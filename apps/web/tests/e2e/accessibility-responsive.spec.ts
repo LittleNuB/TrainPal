@@ -21,7 +21,7 @@ for (const width of widths) {
   test(`home journey remains usable without horizontal overflow at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width <= 390 ? 844 : 900 })
     await page.goto('/')
-    await expect(page.getByRole('heading', { name: /刷到的动作/ })).toBeVisible()
+    await expect(page.getByRole('heading', { name: /把想练的视频/ })).toBeVisible()
     await expect(page.getByText('选择健身视频', { exact: true })).toBeVisible()
     await expect(page.getByRole('navigation', { name: '主要导航' })).toBeVisible()
 
@@ -59,7 +59,7 @@ for (const width of [320, 390] as const) {
 
 test('home and optional profile dialog pass the WCAG automated scan', async ({ page }) => {
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: /刷到的动作/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /把想练的视频/ })).toBeVisible()
   const home = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze()

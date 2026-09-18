@@ -68,7 +68,8 @@ const mockTerminalRun = async (page: Page, outcome: TerminalOutcome): Promise<vo
 
 const startAnalysis = async (page: Page): Promise<void> => {
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: /刷到的动作/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /把想练的视频/ })).toBeVisible()
+  await page.locator('.quick-real-section summary').click()
   await page.getByRole('button', { name: '0:02', exact: true }).click()
   await page.getByRole('dialog').getByRole('button', { name: '确认并开始' }).click()
   await expect(page).toHaveURL(/\/analysis$/)

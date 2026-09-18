@@ -155,6 +155,7 @@ export const useLibraryStore = defineStore('library', () => {
       preferences.value = await requireRepository().savePreferences({
         petVisible,
         coachStyleId: preferences.value.coachStyleId,
+        ...(preferences.value.coachPositions ? { coachPositions: cloneJson(preferences.value.coachPositions) } : {}),
       })
     })
   }
@@ -164,6 +165,7 @@ export const useLibraryStore = defineStore('library', () => {
       preferences.value = await requireRepository().savePreferences({
         petVisible: preferences.value.petVisible,
         coachStyleId,
+        ...(preferences.value.coachPositions ? { coachPositions: cloneJson(preferences.value.coachPositions) } : {}),
       })
     })
   }
@@ -171,6 +173,17 @@ export const useLibraryStore = defineStore('library', () => {
   async function clearAllLocalData(): Promise<void> {
     await requireRepository().clearAllLocalData()
     resetLocalState(persistenceSuspended.value)
+  }
+
+  async function setCoachPosition(layout: 'mobile' | 'desktop', point: { x: number; y: number }): Promise<void> {
+    if (![point.x, point.y].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) return
+    await runOperation(async () => {
+      preferences.value = await requireRepository().savePreferences({
+        petVisible: preferences.value.petVisible,
+        coachStyleId: preferences.value.coachStyleId,
+        coachPositions: { ...cloneJson(preferences.value.coachPositions ?? {}), [layout]: point },
+      })
+    })
   }
 
   async function quiescePersistence(): Promise<void> {
@@ -209,6 +222,7 @@ export const useLibraryStore = defineStore('library', () => {
     saveProfile,
     clearProfile,
     setPetVisible,
+    setCoachPosition,
     confirmCoachStyle,
     clearAllLocalData,
     quiescePersistence,

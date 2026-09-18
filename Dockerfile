@@ -11,6 +11,8 @@ RUN pnpm install --frozen-lockfile --filter @hachimi/web...
 
 COPY apps/web apps/web
 COPY contracts/gymti-questionnaire.v1.json contracts/gymti-questionnaire.v1.json
+ARG VITE_UPLOAD_MAX_BYTES=19000000
+ENV VITE_UPLOAD_MAX_BYTES=${VITE_UPLOAD_MAX_BYTES}
 RUN pnpm --filter @hachimi/web build
 
 FROM ghcr.io/astral-sh/uv:0.11.7 AS uv-runtime
