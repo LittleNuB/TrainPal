@@ -38,6 +38,24 @@ const repository = (): LibraryRepository => ({
 beforeEach(() => setActivePinia(createPinia()))
 
 describe('local training library store', () => {
+  it('remembers separate coach positions through visibility and style changes', async () => {
+    const persistence = repository()
+    const store = useLibraryStore()
+    await store.load(persistence)
+    await store.setCoachPosition('mobile', { x: 1, y: .4 })
+    await store.setCoachPosition('desktop', { x: .7, y: .6 })
+    await store.setPetVisible(false)
+    await store.confirmCoachStyle('gentle')
+    expect(store.preferences.coachPositions).toEqual({ mobile: { x: 1, y: .4 }, desktop: { x: .7, y: .6 } })
+    expect(store.preferences.petVisible).toBe(false)
+    expect(store.preferences.coachStyleId).toBe('gentle')
+    const calls = vi.mocked(persistence.savePreferences).mock.calls.length
+    await store.setCoachPosition('mobile', { x: Number.NaN, y: 2 })
+    expect(persistence.savePreferences).toHaveBeenCalledTimes(calls)
+    await store.clearAllLocalData()
+    expect(store.preferences.coachPositions).toBeUndefined()
+  })
+
   it('defaults Pet to visible and persists an explicit hidden preference', async () => {
     const persistence = repository()
     const store = useLibraryStore()

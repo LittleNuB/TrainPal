@@ -53,7 +53,7 @@ const alreadyConfirmed = computed(() =>
         />
       </div>
       <div class="identity-copy">
-        <p class="tp-kicker">YOUR GYMTI</p>
+        <p class="tp-kicker">你的 GYMTI</p>
         <h1>{{ gymti.label }}</h1>
         <p class="identity-summary">{{ gymti.shortDescription }}</p>
         <p class="narrative">{{ current.narrative.text }}</p>
@@ -72,7 +72,7 @@ const alreadyConfirmed = computed(() =>
 
     <article class="coach-result tp-card" data-result-section="coach">
       <div class="coach-copy">
-        <p class="tp-kicker">YOUR TRAINPAL</p>
+        <p class="tp-kicker">你的 TrainPal</p>
         <span class="recommendation-badge">本次推荐</span>
         <h2>{{ COACH_STYLE_LABELS[formal.recommendedCoachStyleId] }}</h2>
         <p>{{ style.matchReason }}</p>
@@ -109,10 +109,10 @@ const alreadyConfirmed = computed(() =>
 <style scoped>
 .result-step { display: grid; gap: 20px; padding: 12px 0 112px; }
 .gymti-result { display: grid; gap: 17px; }
-.gymti-art { width: 100%; max-width: 600px; justify-self: center; overflow: hidden; border: 1px solid var(--tp-line); border-radius: 28px 28px 28px 8px; background: #E9E1D1; box-shadow: var(--tp-shadow-soft); }
+.gymti-art { width: 100%; max-width: 600px; justify-self: center; overflow: hidden; border: 1px solid var(--tp-line); border-radius: 14px; background: #E9E1D1; box-shadow: var(--tp-shadow-soft); }
 .gymti-art img { display: block; width: 100%; height: auto; aspect-ratio: 60 / 49; object-fit: cover; }
 .identity-copy { display: grid; gap: 9px; }
-.identity-copy h1 { margin: 0; font-size: clamp(38px, 13vw, 64px); line-height: .96; letter-spacing: -.035em; }
+.identity-copy h1 { margin: 0; font-size: clamp(28px, 7vw, 40px); line-height: 1.3; letter-spacing: -.035em; }
 .identity-summary { margin: 0; color: var(--tp-primary-readable); font-size: 14px; font-weight: 800; line-height: 1.55; }
 .narrative { margin: 4px 0 0; color: var(--tp-ink); font-size: 15px; line-height: 1.75; }
 .reason-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
@@ -125,11 +125,12 @@ const alreadyConfirmed = computed(() =>
 .coach-copy .tp-kicker { color: var(--tp-secondary); }
 .recommendation-badge { padding: 5px 7px; border-radius: 999px; color: var(--tp-training-ink); background: rgb(165 186 99 / 18%); font-size: 11px; font-weight: 800; }
 .coach-copy h2 { margin: 2px 0 0; color: var(--tp-training-ink); font-size: 25px; }
-.coach-copy > p:not(.tp-kicker) { margin: 0; color: #BBC3BD; font-size: 12px; line-height: 1.6; }
+.coach-copy > p:not(.tp-kicker) { margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.6; }
 .coach-copy button { min-height: 44px; padding: 0; border: 0; color: var(--tp-secondary); background: transparent; font-size: 12px; font-weight: 800; text-decoration: underline; text-underline-offset: 4px; }
 .coach-art { display: grid; place-items: center; }
 .coach-art :deep(.coach-motion__image) { width: 112px; filter: drop-shadow(0 10px 24px rgb(0 0 0 / 38%)); }
 .retest { justify-self: center; min-height: 44px; padding: 0 12px; border: 0; color: var(--tp-muted); background: transparent; font-size: 12px; text-decoration: underline; text-underline-offset: 4px; }
 .result-action { position: fixed; right: max(14px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); left: max(14px, env(safe-area-inset-left)); z-index: 20; max-width: 732px; margin: auto; padding: 10px; border: 1px solid rgb(28 40 34 / 12%); border-radius: 20px; background: var(--tp-surface); box-shadow: var(--tp-shadow-float); }
 .result-action button { width: 100%; min-height: 50px; border: 1px solid var(--tp-primary); border-radius: 999px; color: #FFFDF8; background: var(--tp-primary-readable); font-weight: 800; }
+@media (min-width: 1024px) { .result-action { left: calc(var(--tp-sidebar-width, 216px) + 24px); } }
 </style>

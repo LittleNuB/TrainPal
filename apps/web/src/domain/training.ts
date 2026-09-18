@@ -24,6 +24,7 @@ export interface Preferences {
   id: 'current'
   petVisible: boolean
   coachStyleId: CoachStyleId | null
+  coachPositions?: Partial<Record<'mobile' | 'desktop', { x: number; y: number }>>
   updatedAt: string
 }
 

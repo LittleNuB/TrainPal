@@ -1,34 +1,38 @@
 :root {
   color-scheme: light;
 
-  /* Frozen TrainPal semantic palette. */
-  --tp-canvas: #F3EFE5;
-  --tp-surface: #FFFDF8;
-  --tp-ink: #1C2822;
-  --tp-muted: #606862;
-  --tp-primary: #D94B2B;
-  --tp-primary-readable: #B43A22;
-  --tp-secondary: #A5BA63;
-  --tp-line: #D8D5CA;
-  --tp-training-canvas: #0E1311;
-  --tp-training-surface: #18201C;
-  --tp-training-ink: #F7F3E9;
+  /* C · 温暖陪伴: one palette across planning and training. */
+  --tp-canvas: #F8F7F2;
+  --tp-surface: #FFFEFA;
+  --tp-ink: #243E32;
+  --tp-muted: #60685E;
+  --tp-primary: #B96342;
+  --tp-primary-readable: #9E4F32;
+  --tp-secondary: #586C49;
+  --tp-sage-surface: #EBEDE1;
+  --tp-surface-raised: var(--tp-sage-surface);
+  --tp-line: #DEDFD4;
+  --tp-training-canvas: var(--tp-canvas);
+  --tp-training-surface: var(--tp-sage-surface);
+  --tp-training-ink: var(--tp-ink);
+  --tp-media-canvas: #18201C;
   --tp-focus: #2459D6;
   --tp-danger: #B3261E;
   --tp-success: #49733B;
   --tp-warning: #9A5B13;
   --tp-radius-sm: 12px;
-  --tp-radius-md: 20px;
-  --tp-radius-lg: 30px;
-  --tp-shadow-soft: 0 18px 50px rgb(42 51 45 / 10%);
-  --tp-shadow-float: 0 20px 54px rgb(20 27 23 / 18%);
-  --font-display: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+  --tp-radius-md: 14px;
+  --tp-radius-lg: 18px;
+  --tp-shadow-soft: 0 3px 16px rgb(42 51 45 / 4%);
+  --tp-shadow-float: 0 12px 40px rgb(20 27 23 / 12%);
+  --font-brand: Georgia, 'Times New Roman', serif;
+  --font-display: 'Bahnschrift', 'PingFang SC', 'Microsoft YaHei UI', sans-serif;
   --font-cn: 'PingFang SC', 'Microsoft YaHei UI', 'Noto Sans CJK SC', sans-serif;
 
   /* Transitional aliases for slices that are being migrated. */
   --bg: var(--tp-canvas);
   --surface: var(--tp-surface);
-  --surface-raised: #F7F3EA;
+  --surface-raised: var(--tp-sage-surface);
   --ink: var(--tp-ink);
   --muted: var(--tp-muted);
   --line: var(--tp-line);
@@ -56,10 +60,6 @@ body {
   margin: 0;
   color: var(--tp-ink);
   background-color: var(--tp-canvas);
-  background-image:
-    linear-gradient(rgb(28 40 34 / 3%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(28 40 34 / 3%) 1px, transparent 1px);
-  background-size: 28px 28px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -86,6 +86,9 @@ input:focus-visible {
   outline-offset: 3px;
 }
 
+/* Route headings receive programmatic focus for screen-reader navigation. */
+h1[tabindex="-1"]:focus { outline: none; }
+
 textarea:focus-visible {
   outline: 2px solid var(--tp-focus);
   outline-offset: 3px;
@@ -101,7 +104,7 @@ textarea:focus-visible {
 ::-webkit-scrollbar-thumb { border-radius: 10px; background: #BDB9AC; }
 
 .tp-page {
-  width: min(100%, 760px);
+  width: min(100%, 1120px);
   min-height: 100dvh;
   margin: 0 auto;
   padding:
@@ -117,15 +120,14 @@ textarea:focus-visible {
 .tp-kicker {
   margin: 0;
   color: var(--tp-primary-readable);
-  font: 700 12px/1 var(--font-display), var(--font-cn);
-  letter-spacing: .16em;
-  text-transform: uppercase;
+  font: 500 12px/1.5 var(--font-cn);
+  letter-spacing: .02em;
 }
 
 .tp-title {
   margin: 0;
   color: var(--tp-ink);
-  font: 700 clamp(36px, 10vw, 64px)/.95 var(--font-display), var(--font-cn);
+  font: 600 clamp(28px, 6vw, 40px)/1.35 var(--font-cn);
   letter-spacing: -.025em;
 }
 
@@ -151,9 +153,9 @@ textarea:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  border-radius: 999px;
+  border-radius: 12px;
   padding: 0 22px;
-  font-weight: 800;
+  font-weight: 600;
   text-decoration: none;
 }
 
@@ -161,7 +163,7 @@ textarea:focus-visible {
   border: 1px solid var(--tp-primary);
   color: #FFFDF8;
   background: var(--tp-primary-readable);
-  box-shadow: 0 12px 24px rgb(217 75 43 / 22%);
+  box-shadow: 0 3px 10px rgb(166 83 53 / 10%);
 }
 
 .tp-primary-action:disabled {
@@ -207,16 +209,16 @@ textarea:focus-visible {
 }
 
 .tp-training-theme {
-  color-scheme: dark;
+  color-scheme: light;
   --bg: var(--tp-training-canvas);
   --surface: var(--tp-training-surface);
-  --surface-raised: #202A25;
+  --surface-raised: var(--tp-surface);
   --ink: var(--tp-training-ink);
-  --muted: #ABB4AD;
-  --line: rgb(247 243 233 / 13%);
-  --line-strong: rgb(247 243 233 / 24%);
+  --muted: var(--tp-muted);
+  --line: var(--tp-line);
+  --line-strong: #B6BEAB;
   --cyan: var(--tp-secondary);
-  --coral: #EF745B;
+  --coral: var(--tp-primary-readable);
   color: var(--tp-training-ink);
   background: var(--tp-training-canvas);
 }

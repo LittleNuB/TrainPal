@@ -222,7 +222,7 @@ describe('方案草稿保存状态', () => {
     await flushPromises()
 
     expect(draft.items).toHaveLength(3)
-    expect(wrapper.text()).toContain('这个方案不是 AI 分析结果')
+    expect(wrapper.text()).toContain('这些示例不是 AI 分析结果')
   })
 
   it('rejects an empty plan title without leaving a hidden stale value', async () => {
@@ -490,6 +490,8 @@ describe('方案草稿保存状态', () => {
     await router.isReady()
     const wrapper = mount(PlanDraftView, { global: { plugins: [pinia, router] } })
 
+    expect(wrapper.find('a.original-video-link').exists()).toBe(false)
+    await wrapper.findAll('.action-summary')[0]!.trigger('click')
     const links = wrapper.findAll('a.original-video-link')
     expect(links).toHaveLength(1)
     expect(links[0]!.text()).toBe('查看原视频')
@@ -547,6 +549,7 @@ describe('方案草稿保存状态', () => {
 
     expect(wrapper.text()).not.toContain('跟练执行')
     expect(wrapper.text()).not.toContain('教学演示')
+    await wrapper.get('.action-summary').trigger('click')
     await wrapper.get('button.local-preview-button').trigger('click')
     await flushPromises()
 
@@ -583,6 +586,7 @@ describe('方案草稿保存状态', () => {
     await flushPromises()
 
     expect(wrapper.get('.adjustment-change-list').text()).toContain('10 次 → 12 次')
+    await wrapper.get('button[data-edit-adjustment-intent]').trigger('click')
     await wrapper.get('button[data-adjustment-intent="easier_to_finish"]').trigger('click')
     expect(wrapper.find('button[data-apply-adjustment]').exists()).toBe(false)
     expect(wrapper.find('.adjustment-change-list').exists()).toBe(false)
@@ -592,15 +596,45 @@ describe('方案草稿保存状态', () => {
     expect(wrapper.find('button[data-apply-adjustment]').exists()).toBe(false)
     expect(draft.adjustmentProposal).toBeNull()
     await wrapper.get('button[data-adjustment-safety-stop]').trigger('click')
+    await wrapper.get('button[data-edit-adjustment-intent]').trigger('click')
     await wrapper.get('button[data-generate-adjustment]').trigger('click')
     await flushPromises()
+    await draft.flushPersist()
+    let releaseApply!: () => void
+    const applyWrite = new Promise<void>((resolve) => { releaseApply = resolve })
+    vi.spyOn(repository, 'save').mockImplementationOnce(async (plan) => {
+      await applyWrite
+      repository.value = structuredClone(plan)
+    })
     await wrapper.get('button[data-apply-adjustment]').trigger('click')
     await flushPromises()
+    try {
+      expect(draft.adjustmentPending).toBe(true)
+      expect(wrapper.find('button[data-apply-adjustment]').exists()).toBe(false)
+      expect(wrapper.get('button[data-adjustment-trigger]').attributes('disabled')).toBeDefined()
+    } finally {
+      releaseApply()
+      await flushPromises()
+    }
     expect(draft.items[0]!.reps).toEqual({ value: 12, source: 'personalized' })
     expect(wrapper.text()).toContain('已为本次训练调整')
 
+    let releaseRestore!: () => void
+    const restoreWrite = new Promise<void>((resolve) => { releaseRestore = resolve })
+    vi.spyOn(repository, 'save').mockImplementationOnce(async (plan) => {
+      await restoreWrite
+      repository.value = structuredClone(plan)
+    })
     await wrapper.get('button[data-restore-base-plan]').trigger('click')
     await flushPromises()
+    try {
+      expect(draft.adjustmentPending).toBe(true)
+      expect(wrapper.find('button[data-restore-base-plan]').exists()).toBe(false)
+      expect(wrapper.get('button[data-adjustment-trigger]').attributes('disabled')).toBeDefined()
+    } finally {
+      releaseRestore()
+      await flushPromises()
+    }
     expect(draft.items[0]!.reps).toEqual({ value: 10, source: 'rule' })
 
     await wrapper.get('button[data-adjustment-trigger]').trigger('click')

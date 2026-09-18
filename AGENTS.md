@@ -77,9 +77,9 @@
 ## Experience boundaries
 
 - The current design source of truth is
-  `docs/design/trainpal-mobile-experience-brief.md`. Use journey-specific pages,
-  a mobile-first responsive layout, a warm journal theme outside training, and
-  a dark high-contrast training stage. Do not recreate a Douyin feed, right-side
+  `docs/design/trainpal-c-implementation-spec.md` and ADR-0047. Use journey-specific pages,
+  a mobile-first responsive layout, warm off-white and sage surfaces, terracotta
+  actions and a light training page with a dark real-video surface. Do not recreate a Douyin feed, right-side
   action rail, fixed phone shell, or mandatory 9:16 video stage.
 - Top-level navigation is `首页 / 训练 / 我的`. Analysis, plan editing,
   personalization, an active training session, and results are immersive

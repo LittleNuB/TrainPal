@@ -33,6 +33,7 @@ test('source tips and conflicting values survive editing, archiving and reopenin
     })}\n\n`,
   }))
   await page.goto('/')
+  await page.locator('.quick-real-section summary').click()
   await page.getByRole('button', { name: '0:02', exact: true }).click()
   await page.getByRole('dialog').getByRole('button', { name: '确认并开始' }).click()
   await page.getByRole('button', { name: '查看训练方案' }).click()
@@ -47,7 +48,7 @@ test('source tips and conflicting values survive editing, archiving and reopenin
   await expect(sheet.getByText('视频建议：每组 12～15 次')).toBeVisible()
   await sheet.getByRole('spinbutton').nth(1).fill('10')
   await sheet.getByRole('button', { name: '确认并加入' }).click()
-  await page.getByRole('link', { name: '返回首页', exact: true }).click()
+  await page.getByRole('link', { name: '返回训练', exact: true }).click()
   await page.getByRole('navigation', { name: '主要导航' }).getByRole('link', { name: '训练', exact: true }).click()
   await expect(page.locator('.saved-row')).toHaveCount(1)
   page.once('dialog', dialog => dialog.accept())

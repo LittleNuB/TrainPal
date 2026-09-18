@@ -32,9 +32,9 @@ watch(
 <template>
   <section class="style-picker">
     <div class="style-intro">
-      <p class="tp-kicker">CHOOSE YOUR TRAINPAL</p>
+      <p class="tp-kicker">小猫教练</p>
       <h1 class="tp-title">哪种陪练方式<br />更像你需要的？</h1>
-      <p>先点选预览，只有点击底部确认后才会写入当前风格。</p>
+      <p>点一只小猫看看，选好后确认即可。</p>
     </div>
 
     <div class="style-grid" role="group" aria-label="七种小猫教练风格">
@@ -94,9 +94,9 @@ watch(
 .style-intro p { margin: 0; }
 .style-intro > p:last-child { max-width: 560px; color: var(--tp-muted); font-size: 13px; line-height: 1.65; }
 .style-grid { display: grid; grid-template-columns: 1fr; gap: 11px; }
-.style-grid > button { position: relative; display: grid; grid-template-columns: 96px minmax(0, 1fr) 22px; min-height: 138px; align-items: center; gap: 10px; overflow: hidden; padding: 12px; border: 1px solid var(--tp-line); border-radius: 20px; color: var(--tp-ink); background: var(--tp-surface); box-shadow: var(--tp-shadow-soft); text-align: left; }
-.style-grid > button.selected { border-color: rgb(217 75 43 / 48%); background: #FBF0E9; box-shadow: 0 12px 32px rgb(90 47 31 / 12%); }
-.style-visual { display: grid; width: 96px; height: 108px; place-items: center; overflow: hidden; border-radius: 18px 18px 18px 6px; background: rgb(165 186 99 / 14%); }
+.style-grid > button { position: relative; display: grid; grid-template-columns: 96px minmax(0, 1fr) 22px; min-height: 138px; align-items: center; gap: 10px; overflow: hidden; padding: 12px; border: 1px solid var(--tp-line); border-radius: 14px; color: var(--tp-ink); background: var(--tp-surface); box-shadow: var(--tp-shadow-soft); text-align: left; }
+.style-grid > button.selected { border-color: var(--tp-secondary); background: var(--tp-surface-raised); box-shadow: none; }
+.style-visual { display: grid; width: 96px; height: 108px; place-items: center; overflow: hidden; border-radius: 12px; background: rgb(165 186 99 / 14%); }
 .style-visual img,
 .style-visual :deep(.coach-motion__image) { width: 86px; max-height: 104px; object-fit: contain; filter: drop-shadow(0 7px 12px rgb(28 40 34 / 18%)); }
 .style-copy { min-width: 0; }
@@ -107,7 +107,7 @@ watch(
 .style-copy p { margin: 5px 0 0; color: var(--tp-muted); font-size: 11px; line-height: 1.55; }
 .style-grid > button > i { display: grid; width: 22px; height: 22px; place-items: center; border: 1px solid var(--tp-line); border-radius: 50%; color: #FFFDF8; background: transparent; font-size: 12px; font-style: normal; }
 .style-grid > button.selected > i { border-color: var(--tp-primary); background: var(--tp-primary); }
-.style-action { position: fixed; right: max(14px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); left: max(14px, env(safe-area-inset-left)); z-index: 20; max-width: 732px; margin: auto; padding: 10px; border: 1px solid rgb(28 40 34 / 12%); border-radius: 20px; background: var(--tp-surface); box-shadow: var(--tp-shadow-float); }
+.style-action { position: fixed; right: max(14px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); left: max(14px, env(safe-area-inset-left)); z-index: 20; max-width: 732px; margin: auto; padding: 10px; border: 1px solid rgb(28 40 34 / 12%); border-radius: 14px; background: var(--tp-surface); box-shadow: var(--tp-shadow-float); }
 .style-action button { width: 100%; min-height: 50px; border: 1px solid var(--tp-primary); border-radius: 999px; color: #FFFDF8; background: var(--tp-primary-readable); font-weight: 800; }
 
 @media (min-width: 360px) {
@@ -119,4 +119,5 @@ watch(
 @media (min-width: 700px) {
   .style-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+@media (min-width: 1024px) { .style-action { left: calc(var(--tp-sidebar-width, 216px) + 24px); } }
 </style>

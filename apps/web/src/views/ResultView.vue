@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import CoachMotion from '@/features/experience/CoachMotion.vue'
@@ -19,6 +19,14 @@ const draft = useDraftStore()
 const training = useTrainingStore()
 const pending = ref(false)
 const feedback = ref('')
+const desktopQuery = typeof window.matchMedia === 'function'
+  ? window.matchMedia('(min-width: 1024px)') : null
+const detailsDefaultOpen = ref(desktopQuery?.matches ?? false)
+const updateDetailsDefault = (event: MediaQueryListEvent): void => {
+  detailsDefaultOpen.value = event.matches
+}
+onMounted(() => desktopQuery?.addEventListener('change', updateDetailsDefault))
+onBeforeUnmount(() => desktopQuery?.removeEventListener('change', updateDetailsDefault))
 const recordId = computed(() => String(route.params.recordId ?? ''))
 const record = computed(() => library.records.find((entry) => entry.id === recordId.value) ?? null)
 const canCreatePoster = computed(() => record.value?.outcome === 'completed')
@@ -147,10 +155,9 @@ onMounted(async () => {
     </header>
 
     <section v-if="record" class="result-card" :class="{ completed: record.outcome === 'completed' }">
-      <div class="journal-tape" aria-hidden="true"></div>
       <div class="result-hero">
         <div>
-          <p class="eyebrow">TrainPal · {{ record.outcome === 'completed' ? 'DONE' : 'SAVED' }}</p>
+          <p class="eyebrow">TrainPal · 训练记录</p>
           <h1>{{ record.outcome === 'completed' ? '练完啦' : '今天先到这里' }}</h1>
           <h2>{{ record.plan.name }}</h2>
         </div>
@@ -176,7 +183,7 @@ onMounted(async () => {
         <span><b>{{ record.completedActionCount }}</b>完成动作</span>
       </div>
 
-      <details class="action-results">
+      <details class="action-results" :open="detailsDefaultOpen">
         <summary>
           <span>本次完成内容</span>
           <small>{{ record.actions.length }} 个动作 · 查看明细</small>
@@ -210,7 +217,7 @@ onMounted(async () => {
 
 <style scoped>
 .result-page {
-  width: min(100%, 760px);
+  width: min(100%, 1120px);
   min-height: 100dvh;
   margin: auto;
   padding:
@@ -218,9 +225,7 @@ onMounted(async () => {
     clamp(16px, 4vw, 28px)
     max(34px, env(safe-area-inset-bottom));
   color: var(--tp-ink);
-  background:
-    radial-gradient(circle at 90% 2%, rgb(165 186 99 / 22%), transparent 21rem),
-    transparent;
+  background: transparent;
 }
 .result-header,
 .result-metrics,
@@ -229,20 +234,18 @@ onMounted(async () => {
 .result-header { justify-content: space-between; }
 .result-header a { display: inline-grid; min-height: 44px; place-items: center; color: var(--tp-ink); font-size: 12px; font-weight: 800; text-decoration: none; }
 .result-header span { color: var(--tp-muted); font-size: 11px; }
-.result-card { position: relative; margin-top: 20px; padding: clamp(22px, 6vw, 42px); border: 1px solid var(--tp-line); border-radius: 6px 30px 30px 30px; background: var(--tp-surface); box-shadow: var(--tp-shadow-soft); }
-.result-card::before { position: absolute; inset: 8px; border: 1px solid rgb(28 40 34 / 5%); border-radius: 4px 23px 23px 23px; content: ''; pointer-events: none; }
-.journal-tape { position: absolute; top: -11px; left: clamp(26px, 10vw, 72px); width: 92px; height: 24px; background: rgb(165 186 99 / 50%); box-shadow: 0 3px 8px rgb(28 40 34 / 8%); rotate: -2deg; }
+.result-card { position: relative; margin-top: 20px; padding: clamp(22px, 6vw, 42px); border: 1px solid var(--tp-line); border-radius: 14px; background: var(--tp-surface); box-shadow: var(--tp-shadow-soft); }
 .result-hero { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .eyebrow { margin: 0; color: var(--tp-primary-readable); font: 700 11px/1 var(--font-display), var(--font-cn); letter-spacing: .14em; }
-.result-card h1 { margin: 12px 0 6px; color: var(--tp-ink); font: 700 clamp(52px, 16vw, 86px)/.84 var(--font-display), var(--font-cn); letter-spacing: -.03em; }
+.result-card h1 { margin: 12px 0 6px; color: var(--tp-ink); font: 700 clamp(32px, 8vw, 44px)/1.3 var(--font-display), var(--font-cn); letter-spacing: -.03em; }
 .result-card h2 { margin: 0; color: var(--tp-muted); font-size: 14px; font-weight: 700; }
-.outcome-stamp { flex: 0 0 auto; padding: 10px 8px; border: 2px solid var(--tp-primary); border-radius: 50%; color: var(--tp-primary-readable); font-size: 11px; font-weight: 900; letter-spacing: .08em; rotate: 6deg; }
+.outcome-stamp { flex: 0 0 auto; padding: 10px 8px; border: 1px solid var(--tp-line); border-radius: 8px; color: var(--tp-primary-readable); font-size: 11px; font-weight: 900; letter-spacing: .08em; }
 .result-card.completed .outcome-stamp { border-color: var(--tp-success); color: var(--tp-success); }
-.coach-result { position: relative; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 14px; margin: 24px 0 12px; padding: 14px 16px; border: 1px solid rgb(165 186 99 / 45%); border-radius: 22px; background: rgb(165 186 99 / 12%); }
+.coach-result { position: relative; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 14px; margin: 24px 0 12px; padding: 14px 16px; border: 1px solid var(--tp-line); border-radius: 14px; background: var(--tp-surface-raised); }
 .coach-result :deep(.trainpal-coach__image) { width: clamp(72px, 22vw, 104px); filter: drop-shadow(0 9px 18px rgb(42 51 45 / 20%)); }
 .coach-result span { color: var(--tp-success); font: 700 11px/1 var(--font-display), var(--font-cn); letter-spacing: .12em; }
 .coach-result p { margin: 7px 0 0; color: var(--tp-ink); font-size: 13px; line-height: 1.6; }
-.result-metrics { position: relative; justify-content: space-between; gap: 8px; margin: 18px 0; padding: 18px 0; border-block: 1px dashed var(--tp-line); }
+.result-metrics { position: relative; justify-content: space-between; gap: 8px; margin: 18px 0; padding: 18px 0; border-block: 1px solid var(--tp-line); }
 .result-metrics span { flex: 1; color: var(--tp-muted); font-size: 11px; text-align: center; }
 .result-metrics b { display: block; margin-bottom: 5px; color: var(--tp-ink); font: 700 clamp(28px, 9vw, 40px)/.9 var(--font-display); }
 .action-results { position: relative; border-bottom: 1px solid var(--tp-line); }
@@ -257,14 +260,14 @@ onMounted(async () => {
 .action-result-row small { margin-top: 3px; color: var(--tp-muted); font-size: 11px; }
 .action-result-row > b { color: var(--tp-success); font-size: 11px; }
 .poster-actions { position: relative; gap: 8px; margin-top: 18px; }
-.poster-actions button { min-height: 48px; flex: 1; border: 1px solid var(--tp-line); border-radius: 999px; color: var(--tp-ink); background: var(--tp-surface); font-weight: 800; }
+.poster-actions button { min-height: 48px; flex: 1; border: 1px solid var(--tp-line); border-radius: 12px; color: var(--tp-ink); background: var(--tp-surface); font-weight: 800; }
 .poster-actions .secondary { color: var(--tp-muted); background: transparent; }
 .early-note,
 .feedback { position: relative; color: var(--tp-muted); font-size: 11px; text-align: center; }
 .early-note { margin: 18px 0 0; padding: 12px; border-radius: 14px; background: rgb(108 116 110 / 8%); line-height: 1.55; }
 .feedback { color: var(--tp-success); }
 .result-card footer { position: relative; flex-direction: column; justify-content: center; gap: 6px; margin-top: 22px; }
-.result-card footer button { display: inline-grid; width: 100%; min-height: 52px; padding: 0 20px; place-items: center; border: 1px solid var(--tp-primary); border-radius: 999px; color: var(--tp-surface); background: var(--tp-primary-readable); box-shadow: 0 12px 24px rgb(217 75 43 / 22%); font-weight: 900; }
+.result-card footer button { display: inline-grid; width: 100%; min-height: 52px; padding: 0 20px; place-items: center; border: 1px solid var(--tp-primary); border-radius: 12px; color: var(--tp-surface); background: var(--tp-primary-readable); box-shadow: var(--tp-shadow-soft); font-weight: 900; }
 .result-card footer a { display: inline-grid; min-width: 44px; min-height: 44px; padding: 0 6px; place-items: center; color: var(--tp-muted); font-size: 11px; font-weight: 700; text-decoration: none; }
 .result-card footer button:disabled { opacity: .5; }
 .missing-result { margin-top: 20vh; padding: 28px; border: 1px solid var(--tp-line); border-radius: 28px; background: var(--tp-surface); text-align: center; box-shadow: var(--tp-shadow-soft); }
@@ -278,5 +281,15 @@ onMounted(async () => {
   .result-metrics { gap: 3px; }
   .result-metrics b { font-size: 26px; }
   .coach-result { grid-template-columns: 1fr; justify-items: center; text-align: center; }
+}
+@media (min-width: 1024px) {
+  .result-card { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 40px; }
+  .result-hero { grid-column: 1 / -1; margin-bottom: 8px; }
+  .coach-result { grid-column: 1; margin: 0; }
+  .result-metrics { grid-column: 1; margin: 0; }
+  .action-results { grid-column: 2; grid-row: 2 / span 3; align-self: start; }
+  .poster-actions, .early-note, .feedback { grid-column: 1; margin-top: 0; }
+  .result-card footer { grid-column: 1 / -1; flex-direction: row; padding-top: 12px; border-top: 1px solid var(--tp-line); }
+  .result-card footer button { width: auto; min-width: 220px; }
 }
 </style>

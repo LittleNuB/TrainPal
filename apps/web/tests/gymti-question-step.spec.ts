@@ -36,7 +36,7 @@ describe('GYMTI question step', () => {
     })
 
     expect(wrapper.text()).toContain(question.prompt)
-    expect(wrapper.text()).toContain('这一步没有通过问卷合同校验')
+    expect(wrapper.text()).toContain('这一步暂时没能完成')
     await wrapper.get('[data-action="retry"]').trigger('click')
     await wrapper.get('[data-action="exit"]').trigger('click')
     expect(wrapper.emitted('retry')).toHaveLength(1)

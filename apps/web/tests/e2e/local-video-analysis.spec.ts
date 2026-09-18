@@ -20,18 +20,20 @@ test('local video survives analysis, plan preview, and training recovery', async
   await page.getByRole('button', { name: '查看训练方案' }).click()
 
   await expect(page).toHaveURL(/\/plan$/)
-  await expect(page.getByText(/本地视频 · e2e-source\.mp4/)).toBeVisible()
   const firstPlanCard = page.locator('.plan-card').first()
   await firstPlanCard.locator('.action-summary').click()
+  await expect(page.getByText(/本地视频 · e2e-source\.mp4/)).toBeVisible()
   const confirmationSheet = page.locator('.action-sheet')
   await confirmationSheet.getByRole('button', { name: '确认并加入' }).click()
   await expect(confirmationSheet).toBeHidden()
-  await firstPlanCard.getByRole('button', { name: '预览来源视频' }).click()
+  await firstPlanCard.locator('.action-summary').click()
+  await page.getByRole('button', { name: '预览来源视频' }).click()
   await expect(page.locator('.local-preview video')).toHaveAttribute('src', /^blob:/)
 
   await page.reload()
+  await page.locator('.plan-card').first().locator('.action-summary').click()
   await expect(page.getByText(/本地视频 · e2e-source\.mp4/)).toBeVisible()
-  await page.locator('.plan-card').first().getByRole('button', { name: '预览来源视频' }).click()
+  await page.getByRole('button', { name: '预览来源视频' }).click()
   await expect(page.locator('.local-preview video')).toHaveAttribute('src', /^blob:/)
 
   const sheet = page.locator('.action-sheet')

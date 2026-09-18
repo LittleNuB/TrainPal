@@ -16,6 +16,7 @@ let ticker: ReturnType<typeof setInterval> | null = null
 
 const isTrainingTheme = computed(() => route.meta.theme === 'training')
 const showBottomNav = computed(() => route.meta.showBottomNav === true)
+const showSidebar = computed(() => !isTrainingTheme.value && !route.path.startsWith('/__design'))
 const showTrainingTask = computed(() => (
   training.hasCurrent && route.meta.showTrainingTask === true
 ))
@@ -78,18 +79,19 @@ onBeforeUnmount(() => {
     :class="{
       'tp-training-theme app-shell--training': isTrainingTheme,
       'app-shell--has-task-dock': taskCount > 0,
+      'app-shell--sidebar': showSidebar,
     }"
     :data-theme="isTrainingTheme ? 'training' : 'journal'"
     :style="taskDockStyle"
   >
     <main v-if="bootstrap.status !== 'ready'" class="bootstrap-shell">
       <template v-if="bootstrap.status === 'loading'">
-        <p class="bootstrap-eyebrow">TRAINPAL · LOCAL FIRST</p>
-        <h1>正在翻开你的训练手账</h1>
+        <p class="bootstrap-eyebrow">TrainPal</p>
+        <h1>正在准备你的训练</h1>
         <p>方案、训练进度和记录只保存在当前设备。</p>
       </template>
       <section v-else role="alert" aria-live="assertive">
-        <p class="bootstrap-eyebrow">READ FAILED</p>
+        <p class="bootstrap-eyebrow">TrainPal</p>
         <h1>本机训练数据暂时无法读取</h1>
         <p>数据没有被清除，可以重新尝试读取。</p>
         <button class="tp-primary-action" type="button" @click="bootstrap.retry">重试读取</button>
@@ -101,11 +103,7 @@ onBeforeUnmount(() => {
     </main>
 
     <template v-else>
-      <RouterView v-slot="{ Component }">
-        <Transition name="page" mode="out-in">
-          <component :is="Component" />
-        </Transition>
-      </RouterView>
+      <RouterView />
 
       <aside
         v-if="showAnalysisTask || showTrainingTask"
@@ -132,7 +130,12 @@ onBeforeUnmount(() => {
         </RouterLink>
       </aside>
 
-      <TopLevelNav v-if="showBottomNav" />
+      <TopLevelNav
+        v-if="showBottomNav || showSidebar"
+        :desktop-only="!showBottomNav"
+        :analysis-label="showAnalysisTask ? analysisLabel : undefined"
+        :training-label="showTrainingTask ? continueLabel : undefined"
+      />
     </template>
   </div>
 </template>
@@ -195,7 +198,7 @@ onBeforeUnmount(() => {
   border: 1px solid rgb(28 40 34 / 15%);
   border-radius: 18px;
   color: var(--tp-training-ink);
-  background: rgb(24 32 28 / 96%);
+  background: var(--tp-surface-raised);
   box-shadow: var(--tp-shadow-float);
   font-size: 13px;
   font-weight: 800;
@@ -220,15 +223,10 @@ onBeforeUnmount(() => {
   font-size: 22px;
 }
 
-.page-enter-active,
-.page-leave-active {
-  transition: opacity 180ms ease, transform 220ms cubic-bezier(.2, .8, .2, 1);
-}
-
-.page-enter-from { opacity: 0; transform: translateY(10px); }
-.page-leave-to { opacity: 0; transform: translateY(-6px); }
-
-@media (min-width: 768px) {
+@media (min-width: 1024px) {
+  .app-shell--sidebar { --tp-sidebar-width: 216px; padding-left: var(--tp-sidebar-width); }
+  .app-shell--sidebar .global-task-dock { display: none; }
+  .app-shell--sidebar :deep(.tp-page) { --tp-task-reserve: 0px; }
   .global-task-dock,
   .global-task-dock--with-nav {
     right: 24px;
@@ -238,8 +236,4 @@ onBeforeUnmount(() => {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .page-enter-active,
-  .page-leave-active { transition: none; }
-}
 </style>
