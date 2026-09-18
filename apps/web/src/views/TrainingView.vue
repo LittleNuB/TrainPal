@@ -195,6 +195,7 @@ const syncVideo = async (): Promise<void> => {
   const element = video.value
   const range = segment.value
   if (!element || !range) return
+  if (document.hidden || leavePause) { element.pause(); return }
   const looping = session.value?.flowVersion === 'watch-v1' && session.value.status === 'active'
   if (looping && (element.ended || element.currentTime >= range.end_seconds)) {
     element.currentTime = range.start_seconds
@@ -225,6 +226,7 @@ const keepVideoInSegment = (): void => {
   const element = video.value
   const range = segment.value
   if (!element || !range) return
+  if (document.hidden || leavePause) { element.pause(); return }
   if (element.currentTime >= range.end_seconds) {
     if (session.value?.flowVersion === 'watch-v1' && session.value.status === 'active' && !training.commandLocked) {
       element.currentTime = range.start_seconds
@@ -244,6 +246,7 @@ const keepVideoInSegment = (): void => {
 const finishVideoSegment = (): void => {
   const element = video.value
   if (!element) return
+  if (document.hidden || leavePause) { element.pause(); return }
   if (session.value?.flowVersion === 'watch-v1' && session.value.status === 'active' && segment.value && !training.commandLocked) {
     element.currentTime = segment.value.start_seconds
     void element.play().catch(() => undefined)

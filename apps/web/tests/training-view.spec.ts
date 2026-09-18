@@ -312,6 +312,36 @@ describe('训练页合同', () => {
     wrapper.unmount()
   })
 
+  it('does not restart reference playback while a leave pause is still saving', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const current = trainingSession('active')
+    current.flowVersion = 'watch-v1'
+    current.plan.items[0]!.sourceRef = { sourceId: source.id }
+    current.plan.items[0]!.segment = { value: { start_seconds: 4, end_seconds: 12 }, source: 'video' }
+    const training = useTrainingStore()
+    await training.load(new SessionEngine(current))
+    useAnalysisStore().sources = [source]
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)
+    let release!: () => void
+    vi.spyOn(training, 'pauseForLeave').mockReturnValue(new Promise<void>((resolve) => { release = resolve }))
+    const wrapper = await mountTraining(pinia)
+    play.mockClear()
+    window.dispatchEvent(new Event('pagehide'))
+    // A late state result and media events must not undo the immediate pause.
+    training.session = { ...training.session!, status: 'countdown' }
+    await flushPromises()
+    training.session = { ...training.session!, status: 'active' }
+    await flushPromises()
+    const media = wrapper.get<HTMLVideoElement>('video')
+    media.element.currentTime = 12
+    await media.trigger('timeupdate')
+    await media.trigger('ended')
+    try { expect(play).not.toHaveBeenCalled() }
+    finally { release(); await flushPromises(); wrapper.unmount() }
+  })
+
   it('makes rest a TrainPal-led focus without covering the reference video', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
