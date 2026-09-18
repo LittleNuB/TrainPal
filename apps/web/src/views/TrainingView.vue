@@ -14,6 +14,8 @@ import type { CoachMotionCue, CoachMotionEvent } from '@/domain/coach'
 import { fingerprintMatches, probeVideoDuration, SUPPORTED_LOCAL_MEDIA_TYPES } from '@/domain/local-media'
 import { toSafeOriginUrl } from '@/domain/source'
 import CoachMotion from '@/features/experience/CoachMotion.vue'
+import SourceTips from '@/features/experience/SourceTips.vue'
+import { currentPlaybackRange } from '@/domain/playback'
 import { derivePetState } from '@/features/experience/pet-state'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useLibraryStore } from '@/stores/library'
@@ -34,8 +36,12 @@ const localMediaResolving = ref(false)
 const localMediaError = ref('')
 const screenReaderAnnouncement = ref('')
 const coachCue = ref<CoachMotionCue | null>(null)
+const soundEnabled = ref(true)
+let cueAudio: AudioContext | null = null
+let unduckTimer: ReturnType<typeof setTimeout> | null = null
+let originalVolume: number | null = null
 let ticker: ReturnType<typeof setInterval> | null = null
-let pausePending = false
+let leavePause: Promise<void> | null = null
 let cueSequence = 0
 let countdownRestKey: string | null = null
 
@@ -54,7 +60,7 @@ const isLocalSource = computed(() => Boolean(
   ),
 ))
 const mediaUrl = computed(() => isLocalSource.value ? localMediaUrl.value : source.value?.media_url ?? null)
-const segment = computed(() => item.value?.segment.value ?? null)
+const segment = computed(() => item.value ? currentPlaybackRange(item.value) : null)
 const hasPlayableVideo = computed(() => Boolean(
   item.value?.sourceRef && mediaUrl.value && segment.value && !mediaLoadFailed.value,
 ))
@@ -79,6 +85,8 @@ const restRemainingSeconds = computed(() => {
     (Date.parse(session.value.restEndsAt) - nowMilliseconds.value) / 1_000,
   ))
 })
+const countdownSeconds = computed(() => session.value?.status === 'countdown'
+  ? Math.max(0, Math.ceil((Date.parse(session.value.countdownEndsAt ?? '') - nowMilliseconds.value) / 1_000)) : 0)
 const durationRemainingSeconds = computed(() => {
   if (item.value?.mode !== 'duration') return 0
   const target = item.value.durationSeconds.value ?? 0
@@ -87,6 +95,7 @@ const durationRemainingSeconds = computed(() => {
 })
 const statusLabel = computed(() => {
   if (!session.value) return '没有未完成训练'
+  if (session.value.status === 'countdown') return '准备开始'
   if (session.value.status === 'active') return item.value?.mode === 'duration' ? '倒计时进行中' : '本组进行中'
   if (session.value.status === 'resting') return '组间休息'
   if (session.value.status === 'ready_to_continue') return '准备继续'
@@ -101,7 +110,7 @@ const startActionLabel = computed(() => {
     session.value?.status === 'paused'
     && (session.value.pauseReason === 'before_start' || session.value.pauseReason === 'between_actions')
   ) {
-    return '开始本组'
+    return session.value.flowVersion === 'watch-v1' ? '准备好了' : '开始本组'
   }
   return '继续训练'
 })
@@ -120,7 +129,10 @@ const isRestFocus = computed(() => (
 ))
 const coachMessage = computed(() => {
   if (!session.value) return ''
-  if (session.value.status === 'resting') return '先放松呼吸。倒计时结束后，由你决定什么时候继续。'
+  if (session.value.status === 'resting') return session.value.flowVersion === 'watch-v1'
+    ? (session.value.currentSetIndex > 0 ? '先放松呼吸。休息结束后自动倒数，开始下一组。' : '先放松呼吸。接下来换动作，准备好后再开始。')
+    : '先放松呼吸。倒计时结束后，由你决定什么时候继续。'
+  if (session.value.status === 'countdown') return '调整好姿势，马上开始。'
   if (session.value.status === 'ready_to_continue') return '休息结束了。确认准备好，再开始下一组。'
   if (session.value.status === 'active') return 'TrainPal 会替你记住进度，你只需要专注完成这一组。'
   if (session.value.pauseReason === 'recovered') return '训练进度已经找回，准备好再继续。'
@@ -183,7 +195,11 @@ const syncVideo = async (): Promise<void> => {
   const element = video.value
   const range = segment.value
   if (!element || !range) return
-  if (element.ended) {
+  if (document.hidden || leavePause) { element.pause(); return }
+  const looping = session.value?.flowVersion === 'watch-v1' && session.value.status === 'active'
+  if (looping && (element.ended || element.currentTime >= range.end_seconds)) {
+    element.currentTime = range.start_seconds
+  } else if (element.ended) {
     element.pause()
     return
   }
@@ -210,7 +226,13 @@ const keepVideoInSegment = (): void => {
   const element = video.value
   const range = segment.value
   if (!element || !range) return
+  if (document.hidden || leavePause) { element.pause(); return }
   if (element.currentTime >= range.end_seconds) {
+    if (session.value?.flowVersion === 'watch-v1' && session.value.status === 'active' && !training.commandLocked) {
+      element.currentTime = range.start_seconds
+      void element.play().catch(() => undefined)
+      return
+    }
     element.currentTime = range.end_seconds
     element.pause()
     return
@@ -224,7 +246,54 @@ const keepVideoInSegment = (): void => {
 const finishVideoSegment = (): void => {
   const element = video.value
   if (!element) return
-  element.pause()
+  if (document.hidden || leavePause) { element.pause(); return }
+  if (session.value?.flowVersion === 'watch-v1' && session.value.status === 'active' && segment.value && !training.commandLocked) {
+    element.currentTime = segment.value.start_seconds
+    void element.play().catch(() => undefined)
+  } else element.pause()
+}
+
+const restoreVideoVolume = (): void => {
+  if (unduckTimer) clearTimeout(unduckTimer)
+  if (video.value && originalVolume !== null) video.value.volume = originalVolume
+  originalVolume = null
+}
+
+const unlockSound = (): void => {
+  if (!soundEnabled.value || !window.AudioContext) return
+  try {
+    cueAudio ??= new AudioContext()
+    void cueAudio.resume().catch(() => undefined)
+  } catch {
+    // Optional audio must never prevent deterministic workout controls.
+    cueAudio = null
+  }
+}
+
+watch(countdownSeconds, (seconds) => {
+  restoreVideoVolume()
+  if (!seconds || !soundEnabled.value || !cueAudio || document.hidden) return
+  if (video.value) {
+    originalVolume = video.value.volume
+    video.value.volume = originalVolume * 0.2
+  }
+  const oscillator = cueAudio.createOscillator()
+  const gain = cueAudio.createGain()
+  oscillator.frequency.value = seconds === 1 ? 880 : 660
+  gain.gain.setValueAtTime(0.12, cueAudio.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.001, cueAudio.currentTime + 0.18)
+  oscillator.connect(gain).connect(cueAudio.destination)
+  oscillator.start()
+  oscillator.stop(cueAudio.currentTime + 0.2)
+  oscillator.onended = () => { oscillator.disconnect(); gain.disconnect() }
+  unduckTimer = setTimeout(restoreVideoVolume, 250)
+})
+
+const toggleSound = (): void => {
+  soundEnabled.value = !soundEnabled.value
+  if (video.value) video.value.muted = !soundEnabled.value
+  if (!soundEnabled.value) restoreVideoVolume()
+  else unlockSound()
 }
 
 const resolveCurrentMedia = async (): Promise<void> => {
@@ -304,7 +373,7 @@ watch(
 const run = async (
   operation: () => Promise<TrainingEngineResult>,
 ): Promise<TrainingEngineResult | null> => {
-  if (commandPending.value) return null
+  if (commandPending.value || leavePause) return null
   commandPending.value = true
   try {
     const result = await operation()
@@ -317,8 +386,14 @@ const run = async (
 }
 
 const startOrContinue = (): Promise<TrainingEngineResult | null> => run(() => {
+  unlockSound()
+  if ((session.value?.pausedRestSeconds ?? 0) > 0) return training.startSet()
   if (session.value?.status === 'ready_to_continue' || session.value?.status === 'resting') {
     return training.continueRest()
+  }
+  if (session.value?.flowVersion === 'watch-v1'
+    && (session.value.pendingCountdown || ['before_start', 'between_actions'].includes(session.value.pauseReason ?? ''))) {
+    return training.prepareSet()
   }
   return training.startSet()
 })
@@ -334,7 +409,7 @@ const endEarly = async (): Promise<void> => {
 }
 
 const skipRemaining = async (): Promise<void> => {
-  if (commandPending.value) return
+  if (commandPending.value || leavePause) return
   commandPending.value = true
   const result = await training.skipAction()
   commandPending.value = false
@@ -345,11 +420,11 @@ const skipRemaining = async (): Promise<void> => {
   await syncVideo()
 }
 
-const pauseForLeave = async (): Promise<void> => {
-  if (pausePending || training.session?.status !== 'active') return
-  pausePending = true
-  await training.pause('page_hidden')
-  pausePending = false
+const pauseForLeave = (): Promise<void> => {
+  video.value?.pause()
+  restoreVideoVolume()
+  leavePause ??= training.pauseForLeave().finally(() => { leavePause = null })
+  return leavePause
 }
 
 const handleVisibility = (): void => {
@@ -378,8 +453,10 @@ onMounted(async () => {
       && Date.now() >= Date.parse(current.restEndsAt)
     if (
       !commandPending.value
+      && !leavePause
+      && !document.hidden
       && !training.commandLocked
-      && (current?.status === 'active' || expiredRest)
+      && (current?.status === 'active' || current?.status === 'countdown' || expiredRest)
     ) {
       void run(() => training.tick())
     }
@@ -388,6 +465,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  restoreVideoVolume()
+  void cueAudio?.close()
   if (ticker) clearInterval(ticker)
   document.removeEventListener('visibilitychange', handleVisibility)
   window.removeEventListener('pagehide', handlePageHide)
@@ -465,6 +544,7 @@ onBeforeUnmount(() => {
             :src="mediaUrl ?? undefined"
             playsinline
             controls
+            :muted="!soundEnabled"
             preload="metadata"
             @loadedmetadata="syncVideo"
             @timeupdate="keepVideoInSegment"
@@ -478,7 +558,7 @@ onBeforeUnmount(() => {
             <span>正在读取{{ isLocalSource ? '本地' : '参考' }}视频…</span>
           </div>
           <div v-else-if="item.sourceRef" class="media-placeholder" role="status">
-            <span class="no-video-mark">VIDEO UNAVAILABLE</span>
+            <span class="no-video-mark">视频暂不可用</span>
             <strong>{{ isLocalSource ? '本地视频已不可用' : '参考视频暂时不可用' }}</strong>
             <small>{{ localMediaError || '可以继续训练，不影响进度记录' }}</small>
             <label v-if="isLocalSource" class="reselect-local-media">
@@ -536,12 +616,14 @@ onBeforeUnmount(() => {
               />
               <div>
                 <span>TrainPal 陪你练</span>
-                <p>{{ coachMessage }}</p>
+                <SourceTips v-if="session.status === 'active' && item.sourceTips?.length" :tips="item.sourceTips" />
+                <p v-else>{{ coachMessage }}</p>
               </div>
             </div>
             <div class="status-readout">
               <span>{{ statusLabel }}</span>
-              <strong v-if="item.mode === 'duration'">{{ formatDuration(durationRemainingSeconds) }}</strong>
+              <strong v-if="session.status === 'countdown'" aria-live="polite">{{ countdownSeconds }}</strong>
+              <strong v-else-if="item.mode === 'duration'">{{ formatDuration(durationRemainingSeconds) }}</strong>
               <strong v-else>{{ item.reps.value }} 次</strong>
               <small>
                 已完成 {{ progress?.completedSets ?? 0 }} / {{ targetSets }} 组
@@ -551,7 +633,13 @@ onBeforeUnmount(() => {
           </template>
 
           <button
-            v-if="session.status === 'paused' || session.status === 'ready_to_continue'"
+            v-if="session.status === 'countdown'"
+            type="button" class="primary-action" :disabled="commandPending || training.commandLocked" @click="pause"
+          >
+            先暂停
+          </button>
+          <button
+            v-else-if="session.status === 'paused' || session.status === 'ready_to_continue'"
             type="button"
             class="primary-action"
             :disabled="commandPending || training.commandLocked"
@@ -582,8 +670,9 @@ onBeforeUnmount(() => {
           <details class="more-actions">
             <summary>更多训练操作</summary>
             <div class="secondary-actions">
+              <button type="button" :aria-pressed="!soundEnabled" @click="toggleSound">{{ soundEnabled ? '静音' : '开启声音' }}</button>
               <button
-                v-if="session.status === 'active'"
+                v-if="session.status === 'active' || session.status === 'resting'"
                 type="button"
                 class="pause-training"
                 :disabled="commandPending || training.commandLocked"
@@ -672,6 +761,8 @@ onBeforeUnmount(() => {
 .coach-strip span,
 .rest-focus__copy > span { color: var(--tp-secondary); font: 700 11px/1 var(--font-display), var(--font-cn); letter-spacing: .12em; }
 .coach-strip p { margin: 5px 0 0; color: var(--tp-training-ink); font-size: 12px; line-height: 1.5; }
+.coach-strip:not(:has(.trainpal-coach)) { grid-template-columns: 1fr; }
+.coach-strip :deep(.source-tips) { margin: 4px 0 0; padding: 0; background: transparent; }
 .status-readout { display: grid; justify-items: center; margin: 8px 0 14px; }
 .status-readout span { color: var(--tp-muted); font-size: 11px; font-weight: 700; }
 .status-readout strong { margin: 5px 0; color: var(--tp-training-ink); font: 700 clamp(52px, 16vw, 76px)/.85 var(--font-display); }

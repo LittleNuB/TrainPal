@@ -35,7 +35,7 @@ export interface PlanSnapshot {
   items: DraftItem[]
 }
 
-export type SessionStatus = 'active' | 'resting' | 'ready_to_continue' | 'paused'
+export type SessionStatus = 'active' | 'resting' | 'ready_to_continue' | 'paused' | 'countdown'
 export type PauseReason = 'before_start' | 'user' | 'page_hidden' | 'recovered' | 'between_actions'
 
 export interface ActionProgress {
@@ -46,6 +46,11 @@ export interface ActionProgress {
 }
 
 export interface TrainingSession {
+  flowVersion?: 'watch-v1'
+  countdownEndsAt?: string | null
+  pendingCountdown?: boolean
+  pausedRestSeconds?: number
+  autoAdvanceSuspended?: boolean
   id: 'current'
   sessionId: string
   revision: number

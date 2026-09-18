@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createHachimiDatabase } from '@/db/hachimi-database'
 import { createDexieTrainingRepository } from '@/db/training-repository'
 import type { TrainingRecord, TrainingSession } from '@/domain/training'
+import { createQuickExperienceDraftItems } from '@/features/quick-experience/fixture'
 
 const databases: string[] = []
 
@@ -59,6 +60,30 @@ afterEach(async () => {
 })
 
 describe('IndexedDB training repository', () => {
+  it.each(['saved', 'draft'])('does not partially save playback when the %s snapshot changed', async (conflicting) => {
+    const { database, repository } = createRepository()
+    const current = session('playback')
+    const item = createQuickExperienceDraftItems()[0]!
+    item.sourceRef = { sourceId: 'source' }
+    item.segment = { value: { start_seconds: 0, end_seconds: 20 }, source: 'video' }
+    current.plan = { name: '方案', source: 'saved', sourcePlanId: 'plan', items: [item] }
+    await repository.createCurrent(current)
+    const changed = { ...structuredClone(item), playbackSelection: { start_seconds: 3, end_seconds: 5 } }
+    const saved = { id: 'plan', name: '方案', items: [conflicting === 'saved' ? changed : item], createdAt: current.startedAt, updatedAt: current.updatedAt }
+    const draft = { id: 'current' as const, name: '方案', linkedPlanId: 'plan', items: [conflicting === 'draft' ? changed : item], updatedAt: current.updatedAt }
+    await database.plans.put(saved)
+    await database.drafts.put(draft)
+    const next = structuredClone(current)
+    next.revision++
+    next.plan.items[0]!.playbackSelection = { start_seconds: 10, end_seconds: 15 }
+    const commit = repository.commit({ sessionId: current.sessionId, expectedRevision: 0, nextSession: next, persistPlayback: true })
+    if (conflicting === 'saved') expect((await commit).status).toBe('conflict')
+    else await expect(commit).rejects.toThrow('draft changed')
+    expect(await database.plans.get('plan')).toEqual(saved)
+    expect(await database.drafts.get('current')).toEqual(draft)
+    expect(await repository.loadCurrent()).toEqual(current)
+    database.close()
+  })
   it('creates only one current session and rejects a stale revision atomically', async () => {
     const { database, repository } = createRepository()
     const first = session('session-a')

@@ -51,7 +51,7 @@ for (const width of [320, 390] as const) {
     await expect(page).toHaveURL(/\/training$/)
     await expect(page.getByRole('heading', { name: '肩部绕环' })).toBeVisible()
     await expect(page.getByText(/按自己的节奏来，训练进度会留在这里/)).toBeVisible()
-    await expect(page.getByRole('button', { name: '开始本组' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '准备好了' })).toBeVisible()
     await expect(page.locator('.trainpal-coach')).toHaveCount(0)
     await expectNoHorizontalOverflow(page)
   })

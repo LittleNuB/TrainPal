@@ -28,7 +28,6 @@ describe('TrainPal route experience contract', () => {
       '/plan',
       '/personalize',
       '/train',
-      '/training',
       '/result/:recordId',
       '/mine',
     ])
@@ -40,6 +39,8 @@ describe('TrainPal route experience contract', () => {
       '/result/:recordId',
       '/mine',
     ])
+    // The active workout stays immersive; task entry remains available after leaving it.
+    expect(routes.find((route) => route.path === '/training')?.meta?.showAnalysisTask).toBe(false)
   })
 
   it('does not register the design gallery in production route records', () => {

@@ -1,5 +1,6 @@
 import type { TrainingPersistence } from '@/db/training-repository'
-import type { DraftItem } from '@/domain/types'
+import type { DraftItem, Segment } from '@/domain/types'
+import { playbackFingerprint, validSelection } from '@/domain/playback'
 import type { CoachStyleId } from '@/domain/coach'
 import type {
   ActionProgress,
@@ -31,7 +32,9 @@ type VersionedCommand = {
 }
 
 export type TrainingCommand =
-  | { type: 'session.create'; plan: PlanSnapshot; coachStyleId: CoachStyleId | null }
+  | { type: 'session.create'; plan: PlanSnapshot; coachStyleId: CoachStyleId | null; flowVersion?: 'watch-v1' }
+  | ({ type: 'set.prepare' } & VersionedCommand)
+  | ({ type: 'playback.select'; itemId: string; fingerprint: string; range: Segment | null } & VersionedCommand)
   | ({ type: 'set.start' } & VersionedCommand)
   | ({ type: 'clock.tick' } & VersionedCommand)
   | ({ type: 'session.pause'; reason: 'user' | 'page_hidden' } & VersionedCommand)
@@ -200,6 +203,20 @@ export const createTrainingEngine = ({
 }: TrainingEngineDependencies): TrainingEngine => {
   let activeCheckpoint: { sessionId: string; milliseconds: number } | null = null
 
+  const prepare = (session: TrainingSession, now: Date): TrainingSession => ({
+    ...session, status: 'countdown', pauseReason: null, pendingCountdown: true, autoAdvanceSuspended: false,
+    countdownEndsAt: new Date(now.getTime() + 3_000).toISOString(),
+    activeStartedAt: null,
+  })
+
+  const afterRest = (session: TrainingSession, now: Date): TrainingSession => {
+    if (session.flowVersion !== 'watch-v1') return session
+    if (session.autoAdvanceSuspended) return session
+    return session.currentSetIndex === 0
+      ? { ...session, status: 'paused', pauseReason: 'between_actions' }
+      : prepare(session, now)
+  }
+
   const withRevision = (session: TrainingSession, now: Date): TrainingSession => ({
     ...session,
     revision: session.revision + 1,
@@ -244,12 +261,14 @@ export const createTrainingEngine = ({
     previous: TrainingSession,
     next: TrainingSession,
     events: TrainingEvent[],
+    persistPlayback = false,
   ): Promise<TrainingEngineResult> => {
     try {
       const result = await persistence.commit({
         sessionId: previous.sessionId,
         expectedRevision: previous.revision,
         nextSession: next,
+        persistPlayback,
       })
       if (result.status === 'committed') return success(result.session, null, events)
       if (result.status === 'already_finalized') return success(null, result.record)
@@ -392,7 +411,7 @@ export const createTrainingEngine = ({
     const restSeconds = item.restSeconds.value ?? 0
     const restStartsAt = now.toISOString()
     const restEndsAt = new Date(now.getTime() + restSeconds * 1_000).toISOString()
-    const next = withRevision({
+    let next = withRevision({
       ...flushed,
       status: restSeconds === 0 ? 'ready_to_continue' : 'resting',
       pauseReason: null,
@@ -403,6 +422,7 @@ export const createTrainingEngine = ({
       restEndsAt: restSeconds === 0 ? null : restEndsAt,
       scheduledRestSeconds: restSeconds === 0 ? null : restSeconds,
     }, now)
+    if (restSeconds === 0) next = afterRest(next, now)
     if (restSeconds > 0) events.push({ type: 'rest.started', endsAt: restEndsAt })
     activeCheckpoint = null
     return commitSession(previous, next, events)
@@ -419,6 +439,7 @@ export const createTrainingEngine = ({
         id: 'current',
         sessionId: idFactory(),
         revision: 0,
+        flowVersion: command.flowVersion,
         status: 'paused',
         pauseReason: 'before_start',
         plan: clone(command.plan),
@@ -457,9 +478,34 @@ export const createTrainingEngine = ({
     const previous = loaded.session
     const now = clock.now()
 
+    if (command.type === 'playback.select') {
+      const item = previous.plan.items[previous.currentItemIndex]
+      if (previous.status !== 'paused' || item.id !== command.itemId
+        || playbackFingerprint(item) !== command.fingerprint || !validSelection(item, command.range)) {
+        return failure('invalid_transition', '动作或片段已变化，请重新选择', previous)
+      }
+      const next = clone(previous)
+      next.plan.items[next.currentItemIndex].playbackSelection = command.range
+      return commitSession(previous, withRevision(next, now), [], true)
+    }
+
+    if (command.type === 'set.prepare') {
+      if (previous.status !== 'paused' && previous.status !== 'ready_to_continue') {
+        return failure('invalid_transition', '请先暂停再准备开始', previous)
+      }
+      return commitSession(previous, withRevision(prepare(previous, now), now), [])
+    }
+
     if (command.type === 'set.start') {
       if (previous.status !== 'paused' && previous.status !== 'ready_to_continue') {
         return failure('invalid_transition', '当前还不能开始下一组', previous)
+      }
+      if ((previous.pausedRestSeconds ?? 0) > 0) {
+        const seconds = previous.pausedRestSeconds!
+        const endsAt = new Date(now.getTime() + seconds * 1_000).toISOString()
+        return commitSession(previous, withRevision({ ...previous, status: 'resting',
+          pauseReason: null, pausedRestSeconds: 0, pendingCountdown: false,
+          restStartedAt: now.toISOString(), restEndsAt: endsAt, scheduledRestSeconds: seconds }, now), [])
       }
       const firstStart = previous.pauseReason === 'before_start'
       const next = withRevision({
@@ -470,6 +516,8 @@ export const createTrainingEngine = ({
         restStartedAt: null,
         restEndsAt: null,
         scheduledRestSeconds: null,
+        countdownEndsAt: null,
+        pendingCountdown: false,
       }, now)
       const item = next.plan.items[next.currentItemIndex]
       const events: TrainingEvent[] = [
@@ -500,15 +548,43 @@ export const createTrainingEngine = ({
     }
 
     if (command.type === 'clock.tick') {
+      if (previous.status === 'countdown') {
+        const deadline = previous.countdownEndsAt ? Date.parse(previous.countdownEndsAt) : NaN
+        if (now.getTime() < deadline) return success(previous)
+        // A throttled/suspended tab must not start or catch up a workout.
+        if (!Number.isFinite(deadline) || now.getTime() - deadline > 2_000) {
+          return commitSession(previous, withRevision({ ...previous, status: 'paused',
+            pauseReason: 'recovered', countdownEndsAt: null }, now), [])
+        }
+        const next = withRevision({ ...previous, status: 'active', pauseReason: null,
+          pendingCountdown: false, countdownEndsAt: null, activeStartedAt: now.toISOString() }, now)
+        const result = await commitSession(previous, next, [{ type: 'set.started',
+          itemId: next.plan.items[next.currentItemIndex].id, setIndex: next.currentSetIndex }])
+        if (result.ok) activeCheckpoint = { sessionId: next.sessionId, milliseconds: clock.monotonicMilliseconds() }
+        return result
+      }
       if (previous.status === 'resting') {
         if (!previous.restEndsAt || now.getTime() < Date.parse(previous.restEndsAt)) {
           return success(previous)
         }
-        const next = withRevision(settleRest(clone(previous), now, 'ready_to_continue'), now)
+        const settled = settleRest(clone(previous), now, 'ready_to_continue')
+        if (previous.flowVersion === 'watch-v1'
+          && now.getTime() - Date.parse(previous.restEndsAt) > 2_000) {
+          settled.autoAdvanceSuspended = true
+        }
+        const next = withRevision(afterRest(settled, now), now)
         return commitSession(previous, next, [{ type: 'rest.finished' }])
       }
       if (previous.status !== 'active') {
         return failure('invalid_transition', '当前不需要记录动作时间', previous)
+      }
+      if (previous.flowVersion === 'watch-v1' && (!activeCheckpoint
+        || clock.monotonicMilliseconds() - activeCheckpoint.milliseconds > 5_000)) {
+        activeCheckpoint = null
+        return commitSession(previous, withRevision({ ...previous, status: 'paused',
+          pauseReason: 'recovered', activeStartedAt: null }, now), [
+          { type: 'session.paused', reason: 'recovered' },
+        ])
       }
       const flushed = flushActive(clone(previous))
       const item = flushed.plan.items[flushed.currentItemIndex]
@@ -524,15 +600,24 @@ export const createTrainingEngine = ({
     }
 
     if (command.type === 'session.pause') {
-      if (previous.status !== 'active') {
+      if (!['active', 'resting', 'countdown', 'ready_to_continue'].includes(previous.status)) {
         return failure('invalid_transition', '当前训练没有在进行', previous)
       }
-      const flushed = flushActive(clone(previous))
+      if (previous.status === 'resting' && command.reason === 'page_hidden') {
+        return commitSession(previous, withRevision({ ...previous, autoAdvanceSuspended: true }, now), [])
+      }
+      const flushed = previous.status === 'resting'
+        ? settleRest(clone(previous), now, 'ready_to_continue')
+        : flushActive(clone(previous))
       const next = withRevision({
         ...flushed,
         status: 'paused',
         pauseReason: command.reason,
         activeStartedAt: null,
+        countdownEndsAt: null,
+        pendingCountdown: previous.status !== 'active' || previous.pendingCountdown,
+        pausedRestSeconds: previous.status === 'resting' && previous.restEndsAt
+          ? Math.max(0, Math.ceil((Date.parse(previous.restEndsAt) - now.getTime()) / 1_000)) : 0,
       }, now)
       activeCheckpoint = null
       return commitSession(previous, next, [
@@ -545,6 +630,11 @@ export const createTrainingEngine = ({
         return failure('invalid_transition', '当前不在组间休息', previous)
       }
       const continuingFromRest = previous.status === 'resting'
+      if (previous.flowVersion === 'watch-v1') {
+        const settled = continuingFromRest ? settleRest(clone(previous), now, 'ready_to_continue') : clone(previous)
+        return commitSession(previous, withRevision(prepare(settled, now), now),
+          continuingFromRest ? [{ type: 'rest.finished' }] : [])
+      }
       const active = continuingFromRest
         ? settleRest(clone(previous), now, 'active')
         : {
@@ -633,12 +723,13 @@ export const createTrainingEngine = ({
       if (!current) return success(null)
       activeCheckpoint = null
       const now = clock.now()
-      if (current.status === 'active') {
+      if (current.status === 'active' || current.status === 'countdown') {
         const next = withRevision({
           ...current,
           status: 'paused',
           pauseReason: 'recovered',
           activeStartedAt: null,
+          countdownEndsAt: null,
         }, now)
         return commitSession(current, next, [{ type: 'session.paused', reason: 'recovered' }])
       }
@@ -649,6 +740,10 @@ export const createTrainingEngine = ({
       ) {
         const next = withRevision(settleRest(clone(current), now, 'ready_to_continue'), now)
         return commitSession(current, next, [{ type: 'rest.finished' }])
+      }
+      if (current.status === 'resting' && current.flowVersion === 'watch-v1') {
+        const next = withRevision({ ...current, autoAdvanceSuspended: true }, now)
+        return commitSession(current, next, [])
       }
       return success(current)
     } catch {
