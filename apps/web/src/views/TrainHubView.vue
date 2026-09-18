@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
 
 import { estimatePlanMinutes } from '@/domain/plan'
 import { QUICK_EXPERIENCE_LABEL } from '@/features/quick-experience/fixture'
@@ -15,6 +15,14 @@ const training = useTrainingStore()
 const pending = ref(false)
 const notice = ref('')
 const showAllPlans = ref(false)
+
+onBeforeRouteLeave(() => !pending.value)
+
+const openEditor = async (): Promise<void> => {
+  draft.resumePersistence()
+  pending.value = false
+  await router.push('/plan')
+}
 
 const currentPlanMinutes = computed(() => estimatePlanMinutes(draft.items))
 const visiblePlans = computed(() => showAllPlans.value ? library.plans : library.plans.slice(0, 4))
@@ -44,7 +52,7 @@ const useQuickPlan = async (): Promise<void> => {
   if (!await prepareReplacement('切换到快速体验方案？当前方案会保留在方案库。')) return
   try {
     draft.adoptPersistedPlan(await library.useQuickExperience())
-    await router.push('/plan')
+    await openEditor()
   } catch {
     notice.value = '快速体验方案没有载入成功，请重试'
   } finally {
@@ -57,7 +65,7 @@ const openPlan = async (planId: string): Promise<void> => {
   if (!await prepareReplacement('打开这个方案？当前方案会保留在方案库。')) return
   try {
     draft.adoptPersistedPlan(await library.openPlan(planId))
-    await router.push('/plan')
+    await openEditor()
   } catch {
     notice.value = '这个方案没有打开成功，请重试'
   } finally {
@@ -89,7 +97,7 @@ const createPlan = async (): Promise<void> => {
   if (!await prepareReplacement('新建一个方案？当前方案会保留在方案库。')) return
   try {
     draft.adoptPersistedPlan(await library.replaceCurrentDraft({ name: '未命名方案', items: [] }))
-    await router.push('/plan')
+    await openEditor()
   } catch {
     notice.value = '新方案没有创建成功，请重试'
   } finally {
@@ -122,6 +130,7 @@ onMounted(async () => {
     </header>
 
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
+    <p v-if="pending" class="notice" role="status">正在保存方案，请稍候…</p>
 
     <section v-if="training.hasCurrent" class="focus-card session-card tp-card">
       <p class="tp-kicker">CONTINUE</p>
