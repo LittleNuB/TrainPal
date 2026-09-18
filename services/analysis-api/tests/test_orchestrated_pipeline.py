@@ -207,6 +207,51 @@ class FailingAsr(FakeAsr):
         raise ProviderError("provider_error", "speech failed", retryable=True)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("speech_failed", [True, False])
+@pytest.mark.parametrize("upstream_excluded", [True, False])
+async def test_no_training_after_semantic_filtering_keeps_speech_failure_distinct_from_empty(
+    tmp_path: Path, speech_failed: bool, upstream_excluded: bool,
+) -> None:
+    class EndingGestureArk(FakeArk):
+        async def locate_visual(self, **kwargs: object) -> VisualLocalizationResult:
+            return VisualLocalizationResult(segments=[VisualSegment(
+                action_name="挥手", start_seconds=1, end_seconds=3,
+                visual_cue="结尾挥手告别，没有训练动作",
+                is_training_content=not upstream_excluded,
+            )])
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda _: httpx.Response(200, json={"output_text": json.dumps({"groups": [{
+            "member_ids": ["visual-1"], "name": None, "relation": "same_demonstration",
+            "content_role": "non_training_gesture", "related_member_id": None,
+        }]})}),
+    )) as client:
+        pipeline = OrchestratedAnalysisPipeline(
+            media=FakeMediaProcessor(tmp_path),
+            asr=FailingAsr() if speech_failed else EmptyAsr(),
+            ark=EndingGestureArk(), skills=skills(),
+            semantic_fusion=SemanticCandidateFusion(
+                model=ArkResponsesClient(api_key="test", model_id="text",
+                                         base_url="https://ark.test", http_client=client),
+                instructions="fixture",
+            ),
+        )
+        output = await pipeline.analyze(source(tmp_path), None, no_op_emit)
+    assert output.candidates == []
+    if speech_failed:
+        assert output.coverage_status == CoverageStatus.INSUFFICIENT
+        assert output.empty_reason == "insufficient_evidence"
+        assert output.processed_seconds == 0
+        assert [(gap.start_seconds, gap.end_seconds, gap.retryable)
+                for gap in output.coverage_gaps] == [(0, source(tmp_path).duration_seconds, True)]
+        assert [warning.code for warning in output.warnings] == ["speech_unavailable"]
+    else:
+        assert output.coverage_status == CoverageStatus.COMPLETE
+        assert output.empty_reason == "no_evidence"
+        assert output.coverage_gaps == []
+
+
 class BlockingAsr(FakeAsr):
     def __init__(self) -> None:
         self.started = asyncio.Event()
@@ -502,11 +547,19 @@ def test_skill_repository_loads_all_three_versioned_contracts() -> None:
 
     assert repository.speech_version == "1.6.0"
     assert repository.visual_version == "1.6.0"
-    assert repository.fusion_version == "2.1.0"
+    assert repository.fusion_version == "2.2.0"
     assert "continuous video clip" in repository.visual_instructions
     assert "clip-local" in repository.visual_instructions
     assert "contact sheet" not in repository.visual_instructions.casefold()
     assert "Merge temporally overlapping evidence" in repository.fusion_instructions
+
+
+def test_active_fusion_contract_separates_identity_from_conflicting_training_values() -> None:
+    instructions = SkillRepository.load(Path(__file__).parents[3] / "skills").fusion_instructions
+
+    assert "Keep their observations separate with relation uncertain" not in instructions
+    assert "Parameter disagreement alone does not make them different occurrences" in instructions
+    assert "Different numbered sections and later executions still remain separate" in instructions
 
 
 @pytest.mark.asyncio

@@ -20,6 +20,7 @@ from hakimi_analysis.media import (
     PreparedVisualChunk,
 )
 from hakimi_analysis.models import (
+    AnalysisCandidate,
     AnalysisWarning,
     CandidateParameters,
     CoverageGap,
@@ -266,18 +267,6 @@ class OrchestratedAnalysisPipeline:
             visual_results.successful_windows,
             visual_results.failures,
         )
-        if isinstance(speech_result, ProviderError) and not visual_segments and not coverage_gaps:
-            coverage_gaps = [
-                CoverageGap(
-                    start_seconds=0,
-                    end_seconds=source.analysis_duration_seconds,
-                    reason=_coverage_gap_reason(speech_result),
-                    retryable=True,
-                )
-            ]
-        processed_seconds = source.analysis_duration_seconds - sum(
-            gap.end_seconds - gap.start_seconds for gap in coverage_gaps
-        )
         warnings: list[AnalysisWarning] = []
         if isinstance(speech_result, ProviderError):
             warnings.append(
@@ -293,6 +282,7 @@ class OrchestratedAnalysisPipeline:
                     message="部分画面依据暂不可用，请重试覆盖缺口",
                 )
             )
+        candidates: list[AnalysisCandidate] = []
         if speech_signals or visual_segments:
             await emit(
                 RunStage.FUSING_CANDIDATES,
@@ -314,6 +304,21 @@ class OrchestratedAnalysisPipeline:
                     speech_signals=speech_signals,
                     visual_segments=visual_segments,
                 )
+        # Non-training observations may all disappear during semantic filtering.
+        # Decide empty/failure coverage from usable candidates, not raw observations.
+        if isinstance(speech_result, ProviderError) and not candidates and not coverage_gaps:
+            coverage_gaps = [
+                CoverageGap(
+                    start_seconds=0,
+                    end_seconds=source.analysis_duration_seconds,
+                    reason=_coverage_gap_reason(speech_result),
+                    retryable=True,
+                )
+            ]
+        processed_seconds = source.analysis_duration_seconds - sum(
+            gap.end_seconds - gap.start_seconds for gap in coverage_gaps
+        )
+        if candidates:
             return PipelineOutput(
                 candidates=candidates,
                 warnings=warnings,

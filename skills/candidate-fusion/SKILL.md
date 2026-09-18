@@ -1,6 +1,6 @@
 ---
 name: candidate-fusion
-version: 2.1.0
+version: 2.2.0
 description: Align exercise evidence and distinguish demonstrations from reference-only content.
 ---
 
@@ -49,8 +49,13 @@ of the SAME demonstration. Temporal overlap is a strong clue, not proof:
   without overlap, leave them separate rather than stretching or inventing times.
   A visual preview or recap may instead reference a separate formal demonstration
   using related_member_id; never include it in that demonstration's member_ids.
-- Explicit conflicting parameters (including reps versus duration or ranges) are
-  not yours to resolve. Keep their observations separate with relation uncertain.
+- Decide demonstration identity independently from training parameter agreement.
+  Parameter disagreement alone does not make them different occurrences.
+  When the supplied identity and overlap evidence establishes the same demonstration,
+  group the observations with relation same_demonstration even if repetitions,
+  ranges, sets or mode conflict. Do not select, average, rewrite or discard values:
+  deterministic code preserves each conflicting value and its evidence in one
+  candidate requiring confirmation. Different numbered sections and later executions still remain separate.
 - If uncertain whether observations describe one occurrence, keep them as separate
   singleton groups with relation uncertain. No silent dropping of doubtful evidence.
 
