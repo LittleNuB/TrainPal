@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import cast
 from uuid import uuid4
 
+from hakimi_analysis.evidence_time import offset_span, offset_tip
 from hakimi_analysis.models import (
     AnalysisCandidate,
     AnalysisError,
@@ -366,21 +367,30 @@ def _offset_candidates(
     return [
         candidate.model_copy(
             update={
-                "segment": candidate.segment.model_copy(
-                    update={
-                        "start_seconds": candidate.segment.start_seconds + offset_seconds,
-                        "end_seconds": candidate.segment.end_seconds + offset_seconds,
-                    }
-                ),
-                "evidence": [
-                    span.model_copy(
+                "segment": offset_span(candidate.segment, offset_seconds),
+                "tips": [offset_tip(tip, offset_seconds) for tip in candidate.tips],
+                "playback_options": [
+                    offset_span(option, offset_seconds) for option in candidate.playback_options
+                ],
+                "parameter_conflicts": [
+                    conflict.model_copy(
                         update={
-                            "start_seconds": span.start_seconds + offset_seconds,
-                            "end_seconds": span.end_seconds + offset_seconds,
+                            "alternatives": [
+                                alternative.model_copy(
+                                    update={
+                                        "evidence": [
+                                            offset_span(span, offset_seconds)
+                                            for span in alternative.evidence
+                                        ]
+                                    }
+                                )
+                                for alternative in conflict.alternatives
+                            ]
                         }
                     )
-                    for span in candidate.evidence
+                    for conflict in candidate.parameter_conflicts
                 ],
+                "evidence": [offset_span(span, offset_seconds) for span in candidate.evidence],
             }
         )
         for candidate in candidates
@@ -405,7 +415,18 @@ def _validate_pipeline_candidates(
                 "candidate segment is outside the requested range",
                 retryable=True,
             )
-        for evidence in candidate.evidence:
+        spans: list[Segment] = [
+            *candidate.evidence,
+            *candidate.playback_options,
+            *(tip.evidence for tip in candidate.tips),
+            *(
+                span
+                for conflict in candidate.parameter_conflicts
+                for alternative in conflict.alternatives
+                for span in alternative.evidence
+            ),
+        ]
+        for evidence in spans:
             if not _span_is_within_duration(evidence, duration_seconds):
                 raise PipelineFailure(
                     "schema_error",

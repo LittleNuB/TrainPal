@@ -242,10 +242,16 @@ export interface components {
             name: string;
             /** Needs Confirmation */
             needs_confirmation: boolean;
+            /** Parameter Conflicts */
+            parameter_conflicts?: components["schemas"]["ParameterConflict"][];
             parameters: components["schemas"]["CandidateParameters"];
+            /** Playback Options */
+            playback_options?: components["schemas"]["SourceClip"][];
             segment: components["schemas"]["Segment"];
             /** Source Id */
             source_id: string;
+            /** Tips */
+            tips?: components["schemas"]["SourceTip"][];
         };
         /** AnalysisError */
         AnalysisError: {
@@ -305,7 +311,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "speech_unavailable" | "visual_unavailable";
+            code: "speech_unavailable" | "visual_unavailable" | "semantic_fusion_unavailable" | "semantic_fusion_conflict";
             /** Message */
             message: string;
         };
@@ -332,6 +338,8 @@ export interface components {
             mode?: components["schemas"]["ActionMode"] | null;
             /** Reps */
             reps?: number | null;
+            /** Reps Max */
+            reps_max?: number | null;
             /** Rest Seconds */
             rest_seconds?: number | null;
             /** Sets */
@@ -481,6 +489,22 @@ export interface components {
              */
             status: "not_ready";
         };
+        /** ParameterAlternative */
+        ParameterAlternative: {
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceSpan"][];
+            parameters: components["schemas"]["CandidateParameters"];
+        };
+        /** ParameterConflict */
+        ParameterConflict: {
+            /** Alternatives */
+            alternatives: components["schemas"]["ParameterAlternative"][];
+            /**
+             * Field
+             * @enum {string}
+             */
+            field: "mode" | "sets" | "reps" | "duration_seconds" | "rest_seconds";
+        };
         /** ReadyResponse */
         ReadyResponse: {
             /**
@@ -506,6 +530,15 @@ export interface components {
             /** Start Seconds */
             start_seconds: number;
         };
+        /** SourceClip */
+        SourceClip: {
+            /** End Seconds */
+            end_seconds: number;
+            /** Label */
+            label: string;
+            /** Start Seconds */
+            start_seconds: number;
+        };
         /** SourceSummary */
         SourceSummary: {
             /** Duration Seconds */
@@ -518,6 +551,17 @@ export interface components {
             origin_url?: string | null;
             /** Title */
             title: string;
+        };
+        /** SourceTip */
+        SourceTip: {
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "setup" | "path" | "breathing" | "rhythm" | "caution";
+            evidence: components["schemas"]["EvidenceSpan"];
+            /** Text */
+            text: string;
         };
         /** UpgradeAccessSessionRequest */
         UpgradeAccessSessionRequest: {

@@ -26,6 +26,7 @@ from hakimi_analysis.providers.ark import ArkResponsesClient
 from hakimi_analysis.providers.asr import VolcAsrClient
 from hakimi_analysis.readiness import ProductionReadiness
 from hakimi_analysis.runtime_cleanup import RuntimeCleanupMonitor
+from hakimi_analysis.semantic_fusion import SemanticCandidateFusion
 from hakimi_analysis.settings import PROJECT_ROOT, Settings
 from hakimi_analysis.sources import (
     MAX_ANALYZABLE_SOURCE_DURATION_SECONDS,
@@ -173,6 +174,7 @@ def build_pipeline(
         asr=asr,
         ark=ark,
         skills=skills,
+        semantic_fusion=SemanticCandidateFusion(model=ark, instructions=skills.fusion_instructions),
         evidence_timeout_seconds=settings.analysis_evidence_timeout_seconds,
         visual_chunk_timeout_seconds=settings.analysis_chunk_timeout_seconds,
         visual_chunk_seconds=settings.analysis_visual_chunk_seconds,

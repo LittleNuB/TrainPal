@@ -9,6 +9,7 @@ import type { AdjustableField, AdjustmentIntent, AdjustmentReasonCode } from '@/
 import { toSafeOriginUrl } from '@/domain/source'
 import type { ActionMode, DraftItem } from '@/domain/types'
 import CoachMotion from '@/features/experience/CoachMotion.vue'
+import SourceTips from '@/features/experience/SourceTips.vue'
 import { QUICK_EXPERIENCE_PLAN_NAME } from '@/features/quick-experience/fixture'
 import { useDraftStore } from '@/stores/draft'
 import { useGymtiStore } from '@/stores/gymti'
@@ -734,6 +735,29 @@ const retryOperation = async (): Promise<void> => {
         </div>
 
         <section class="source-detail">
+          <div v-if="selectedItem.parameterConflicts?.length" class="source-parameter-note" role="note">
+            <strong>视频中有不同说法，请核对后设置</strong>
+            <p>请对照出处选择适合你的次数或时长，确认后再开始训练。</p>
+            <div v-for="conflict in selectedItem.parameterConflicts" :key="conflict.field">
+              <b>{{ ({ mode: '训练方式', sets: '组数', reps: '次数', duration_seconds: '时长', rest_seconds: '休息' })[conflict.field] }}</b>
+              <ul>
+                <li v-for="(alternative, index) in conflict.alternatives" :key="index">
+                  <template v-if="conflict.field === 'reps'">{{ alternative.parameters.reps }}<template v-if="alternative.parameters.reps_max">–{{ alternative.parameters.reps_max }}</template> 次</template>
+                  <template v-else-if="conflict.field === 'mode'">
+                    {{ alternative.parameters.mode === 'reps' || alternative.parameters.reps != null ? '按次数' : '按时长' }}
+                    <span v-if="alternative.parameters.reps != null"> · {{ alternative.parameters.reps }}<template v-if="alternative.parameters.reps_max != null">–{{ alternative.parameters.reps_max }}</template> 次</span>
+                    <span v-if="alternative.parameters.duration_seconds != null"> · {{ alternative.parameters.duration_seconds }} 秒</span>
+                  </template>
+                  <template v-else>{{ alternative.parameters[conflict.field] }} {{ conflict.field === 'sets' ? '组' : '秒' }}</template>
+                  <small v-for="(span, spanIndex) in alternative.evidence" :key="spanIndex"> · {{ span.type === 'speech' ? '语音' : '字幕' }} {{ span.start_seconds.toFixed(1) }}–{{ span.end_seconds.toFixed(1) }} 秒</small>
+                </li>
+              </ul>
+            </div>
+          </div>
+          <SourceTips :tips="selectedItem.sourceTips ?? []" />
+          <p v-if="selectedItem.sourceParameters?.reps_max" class="source-parameter-note">
+            视频建议：<template v-if="selectedItem.sourceParameters.sets">{{ selectedItem.sourceParameters.sets }} 组，</template>每组 {{ selectedItem.sourceParameters.reps }}～{{ selectedItem.sourceParameters.reps_max }} 次
+          </p>
           <div>
             <p class="tp-kicker">SOURCE</p>
             <strong>{{ sourceLabel(selectedItem) }}</strong>
@@ -1003,6 +1027,8 @@ const retryOperation = async (): Promise<void> => {
 .segment-line em { color: var(--tp-primary-readable); font-size: 11px; font-style: normal; }
 .parameter-grid input { width: 100%; min-height: 48px; padding: 10px 12px; border: 1px solid var(--tp-line); border-radius: 12px; color: var(--tp-ink); background: #F7F3EA; font: 700 19px/1 var(--font-display); }
 .source-detail { display: grid; gap: 10px; padding: 15px; border: 1px solid var(--tp-line); border-radius: 16px; background: #F7F3EA; }
+.source-parameter-note { margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.source-parameter-note small { display: block; }
 .source-detail strong { display: block; margin-top: 5px; font-size: 13px; }
 .segment-line { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; color: var(--tp-muted); font-size: 11px; }
 .segment-line b { margin-left: auto; color: var(--tp-ink); font: 700 15px/1 var(--font-display); }
