@@ -568,6 +568,10 @@ export const createTrainingEngine = ({
           return success(previous)
         }
         const settled = settleRest(clone(previous), now, 'ready_to_continue')
+        if (previous.flowVersion === 'watch-v1'
+          && now.getTime() - Date.parse(previous.restEndsAt) > 2_000) {
+          settled.autoAdvanceSuspended = true
+        }
         const next = withRevision(afterRest(settled, now), now)
         return commitSession(previous, next, [{ type: 'rest.finished' }])
       }

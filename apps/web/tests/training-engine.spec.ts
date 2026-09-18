@@ -142,6 +142,16 @@ const setup = () => {
 }
 
 describe('TrainingEngine public command interface', () => {
+  it('does not auto-advance when a watch-flow rest tick arrives long after its deadline', async () => {
+    const { engine, clock, persistence } = setup()
+    await engine.dispatch({ type: 'session.create', plan: plan(repsAction({ restSeconds: sourced(2, 'user') })), coachStyleId: null, flowVersion: 'watch-v1' })
+    await engine.dispatch({ type: 'set.start', sessionId: 'session-1', expectedRevision: 0 })
+    await engine.dispatch({ type: 'set.complete', sessionId: 'session-1', expectedRevision: persistence.current!.revision })
+    clock.advance(60_000)
+    const result = expectSuccess(await engine.dispatch({ type: 'clock.tick', sessionId: 'session-1', expectedRevision: persistence.current!.revision }))
+    expect(result.session?.status).toBe('ready_to_continue')
+    expect(result.session?.currentSetActiveMilliseconds).toBe(0)
+  })
   it('does not credit a suspended watch-flow clock or complete its timed set', async () => {
     const { engine, clock, persistence } = setup()
     await engine.dispatch({ type: 'session.create', plan: plan(durationAction()), coachStyleId: null, flowVersion: 'watch-v1' })

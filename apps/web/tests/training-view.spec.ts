@@ -183,6 +183,69 @@ const mountTraining = async (pinia: ReturnType<typeof createPinia>) => {
 }
 
 describe('训练页合同', () => {
+  it.each(['hidden', 'pagehide', 'route'])('pauses a late preparation commit after %s', async (leave) => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    let current = trainingSession('paused')
+    current.flowVersion = 'watch-v1'
+    current.pauseReason = 'before_start'
+    let release!: () => void
+    const write = new Promise<void>((resolve) => { release = resolve })
+    const commands: string[] = []
+    const engine: TrainingEngine = {
+      restore: async () => ({ ok: true, session: current, record: null, events: [] }),
+      dispatch: async (command) => {
+        commands.push(command.type)
+        if (command.type === 'set.prepare') {
+          await write
+          current = { ...current, status: 'countdown', revision: current.revision + 1 }
+        } else if (command.type === 'session.pause') {
+          current = { ...current, status: 'paused', pauseReason: 'page_hidden', revision: current.revision + 1 }
+        }
+        return { ok: true, session: current, record: null, events: [] }
+      },
+    }
+    const training = useTrainingStore()
+    await training.load(engine)
+    const router = createRouter({ history: createMemoryHistory(), routes: [
+      { path: '/training', component: TrainingView },
+      { path: '/plan', component: { template: '<p>plan</p>' } },
+    ] })
+    await router.push('/training')
+    const wrapper = mount({ template: '<RouterView />' }, { global: { plugins: [pinia, router] } })
+    await flushPromises()
+    await wrapper.get('button.primary-action').trigger('click')
+    await flushPromises()
+    let navigation: Promise<unknown> | undefined
+    if (leave === 'hidden') {
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+      document.dispatchEvent(new Event('visibilitychange'))
+    } else if (leave === 'pagehide') window.dispatchEvent(new Event('pagehide'))
+    else navigation = router.push('/plan')
+    await flushPromises()
+    release()
+    await flushPromises()
+    await navigation
+    expect(commands).toEqual(['set.prepare', 'session.pause'])
+    expect(training.session?.status).toBe('paused')
+    wrapper.unmount()
+  })
+
+  it('offers pause during rest before the next automatic countdown', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const current = trainingSession('resting')
+    current.flowVersion = 'watch-v1'
+    const engine = new SessionEngine(current)
+    await useTrainingStore().load(engine)
+    const wrapper = await mountTraining(pinia)
+    const pauseButton = wrapper.findAll('button').find((button) => button.text() === '暂停')
+    expect(pauseButton).toBeDefined()
+    await pauseButton!.trigger('click')
+    await flushPromises()
+    expect(engine.commands.some((command) => command.type === 'session.pause')).toBe(true)
+    wrapper.unmount()
+  })
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()

@@ -197,6 +197,16 @@ export const useTrainingStore = defineStore('training', () => {
     expectedRevision: current.revision,
   }))
 
+  // Inspect state only after earlier commands settle: a pending preparation or
+  // resume may still look paused at the moment the page becomes hidden.
+  const pauseForLeave = () => serialize(async () => {
+    const current = session.value
+    if (!engine || !current || persistenceSuspended.value || commandLocked.value
+      || !['active', 'countdown', 'resting'].includes(current.status)) return
+    applyResult(await engine.dispatch({ type: 'session.pause', reason: 'page_hidden',
+      sessionId: current.sessionId, expectedRevision: current.revision }))
+  })
+
   const completeSet = () => runVersioned((current) => ({
     type: 'set.complete',
     sessionId: current.sessionId,
@@ -262,6 +272,7 @@ export const useTrainingStore = defineStore('training', () => {
     selectPlayback,
     tick,
     pause,
+    pauseForLeave,
     completeSet,
     continueRest,
     skipAction,

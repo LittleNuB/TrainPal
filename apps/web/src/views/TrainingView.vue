@@ -41,7 +41,7 @@ let cueAudio: AudioContext | null = null
 let unduckTimer: ReturnType<typeof setTimeout> | null = null
 let originalVolume: number | null = null
 let ticker: ReturnType<typeof setInterval> | null = null
-let pausePending = false
+let leavePause: Promise<void> | null = null
 let cueSequence = 0
 let countdownRestKey: string | null = null
 
@@ -370,7 +370,7 @@ watch(
 const run = async (
   operation: () => Promise<TrainingEngineResult>,
 ): Promise<TrainingEngineResult | null> => {
-  if (commandPending.value) return null
+  if (commandPending.value || leavePause) return null
   commandPending.value = true
   try {
     const result = await operation()
@@ -406,7 +406,7 @@ const endEarly = async (): Promise<void> => {
 }
 
 const skipRemaining = async (): Promise<void> => {
-  if (commandPending.value) return
+  if (commandPending.value || leavePause) return
   commandPending.value = true
   const result = await training.skipAction()
   commandPending.value = false
@@ -417,13 +417,11 @@ const skipRemaining = async (): Promise<void> => {
   await syncVideo()
 }
 
-const pauseForLeave = async (): Promise<void> => {
+const pauseForLeave = (): Promise<void> => {
   video.value?.pause()
   restoreVideoVolume()
-  if (pausePending || !['active', 'countdown', 'resting'].includes(training.session?.status ?? '')) return
-  pausePending = true
-  await training.pause('page_hidden')
-  pausePending = false
+  leavePause ??= training.pauseForLeave().finally(() => { leavePause = null })
+  return leavePause
 }
 
 const handleVisibility = (): void => {
@@ -452,6 +450,7 @@ onMounted(async () => {
       && Date.now() >= Date.parse(current.restEndsAt)
     if (
       !commandPending.value
+      && !leavePause
       && !document.hidden
       && !training.commandLocked
       && (current?.status === 'active' || current?.status === 'countdown' || expiredRest)
@@ -670,7 +669,7 @@ onBeforeUnmount(() => {
             <div class="secondary-actions">
               <button type="button" :aria-pressed="!soundEnabled" @click="toggleSound">{{ soundEnabled ? '静音' : '开启声音' }}</button>
               <button
-                v-if="session.status === 'active'"
+                v-if="session.status === 'active' || session.status === 'resting'"
                 type="button"
                 class="pause-training"
                 :disabled="commandPending || training.commandLocked"
