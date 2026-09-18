@@ -10,6 +10,34 @@ const microphone = () => {
 }
 
 describe('one-shot voice capture lifecycle', () => {
+  it.each(['module', 'resume'])('cancels while %s initialization is pending and releases the microphone', async (pending) => {
+    const { stop } = microphone()
+    let release!: () => void
+    const waiting = new Promise<void>((resolve) => { release = resolve })
+    const close = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('AudioContext', class {
+      audioWorklet = { addModule: () => pending === 'module' ? waiting : Promise.resolve() }
+      resume = () => pending === 'resume' ? waiting : Promise.resolve()
+      close = close
+    })
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:initializing')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    const controller = new AbortController()
+    const capture = captureVoiceCommand(controller.signal)
+    let rejected = false
+    void capture.catch(() => { rejected = true })
+    for (let i = 0; i < 8; i++) await Promise.resolve()
+    controller.abort()
+    for (let i = 0; i < 12; i++) await Promise.resolve()
+    try {
+      expect(stop).toHaveBeenCalledOnce()
+      expect(close).toHaveBeenCalledOnce()
+      expect(rejected).toBe(true)
+    } finally {
+      release()
+      await capture.catch(() => undefined)
+    }
+  })
   it('offers a text fallback when microphone permission is denied', async () => {
     microphone()
     vi.stubGlobal('AudioContext', class {})

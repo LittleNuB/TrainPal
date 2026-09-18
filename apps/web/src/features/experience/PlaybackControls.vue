@@ -136,7 +136,9 @@ const save = async (restore = false) => {
     }
     const result = await training.selectPlayback(selected)
     if (!result.ok) { message.value = result.message; return }
-    await Promise.all([draft.reload(), library.reload()])
+    if (draft.syncSavedPlaybackSelection({ ...selected,
+      planId: result.session?.plan.sourcePlanId ?? null })) await draft.flushPersist()
+    await library.refreshHistory()
     proposal.value = null
     message.value = restore ? '已恢复完整教学，准备好后继续。' : '已记住这个片段，下次复练也会使用。'
     if (!restore && request === generation && !document.hidden

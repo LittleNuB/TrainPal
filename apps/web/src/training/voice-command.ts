@@ -24,6 +24,12 @@ export const captureVoiceCommand = async (signal: AbortSignal): Promise<Blob> =>
   let moduleUrl: string | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   let abort: (() => void) | null = null
+  const initialize = <T>(operation: Promise<T>): Promise<T> => new Promise((resolve, reject) => {
+    const cancel = () => reject(new Error('已取消'))
+    signal.addEventListener('abort', cancel, { once: true })
+    if (signal.aborted) cancel()
+    operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', cancel))
+  })
   try {
     const context = new AudioContext({ sampleRate: 16_000 })
     audioContext = context
@@ -38,8 +44,8 @@ export const captureVoiceCommand = async (signal: AbortSignal): Promise<Blob> =>
       }
       registerProcessor('trainpal-command', CommandCapture);
     `], { type: 'application/javascript' }))
-    await context.audioWorklet.addModule(moduleUrl)
-    await context.resume()
+    await initialize(context.audioWorklet.addModule(moduleUrl))
+    await initialize(context.resume())
     if (signal.aborted) throw new Error('已取消')
     source = context.createMediaStreamSource(stream)
     recorder = new AudioWorkletNode(context, 'trainpal-command')

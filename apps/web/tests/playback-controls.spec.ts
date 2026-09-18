@@ -38,6 +38,27 @@ const setup = () => {
 }
 
 describe('bounded playback controls', () => {
+  it('preserves new manual values after unmounting during a clip save', async () => {
+    const { wrapper, button, propose, save, training } = setup()
+    const draft = useDraftStore()
+    vi.mocked(draft.reload).mockRestore()
+    const stored = JSON.parse(JSON.stringify({ id: 'current', linkedPlanId: 'plan',
+      name: '方案', items: training.session!.plan.items, updatedAt: '2026-09-19T00:00:00Z' }))
+    await draft.load({ load: async () => stored, save: async () => undefined })
+    let finish!: () => void
+    save.mockImplementation(async () => {
+      await new Promise<void>((resolve) => { finish = resolve })
+      return { ok: true, session: training.session, record: null, events: [] }
+    })
+    await propose()
+    await button('用这段并继续').trigger('click')
+    await flushPromises()
+    wrapper.unmount()
+    draft.updateValue(draft.items[0]!.id, 'reps', 19)
+    finish()
+    await flushPromises()
+    expect(draft.items[0]!.reps).toEqual({ value: 19, source: 'user' })
+  })
   it('ignores a response arriving after cancellation without changing or resuming the clip', async () => {
     const { wrapper, button, propose, save, training } = setup()
     const before = { ...training.session!.plan.items[0]!.segment.value }
