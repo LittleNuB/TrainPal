@@ -159,6 +159,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/playback-adjustments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Select Playback */
+        post: operations["select_playback_api_v1_playback_adjustments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playback-voice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Transcribe Playback */
+        post: operations["transcribe_playback_api_v1_playback_voice_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ready": {
         parameters: {
             query?: never;
@@ -505,6 +539,11 @@ export interface components {
              */
             field: "mode" | "sets" | "reps" | "duration_seconds" | "rest_seconds";
         };
+        /** PlaybackChoice */
+        PlaybackChoice: {
+            /** Option Id */
+            option_id: string | null;
+        };
         /** ReadyResponse */
         ReadyResponse: {
             /**
@@ -580,6 +619,11 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** VoiceCommand */
+        VoiceCommand: {
+            /** Text */
+            text: string;
         };
     };
     responses: never;
@@ -1090,6 +1134,71 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+        };
+    };
+    select_playback_api_v1_playback_adjustments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Action Name */
+                    action_name: string;
+                    /** Instruction */
+                    instruction: string;
+                    /** Options */
+                    options: {
+                        /** End Seconds */
+                        end_seconds: number;
+                        /** Id */
+                        id: string;
+                        /** Label */
+                        label: string;
+                        /** Start Seconds */
+                        start_seconds: number;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaybackChoice"];
+                };
+            };
+        };
+    };
+    transcribe_playback_api_v1_playback_voice_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Single-channel 16-bit 16000 Hz PCM WAV, at most 15 seconds and 480044 bytes. */
+        requestBody: {
+            content: {
+                "audio/wav": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceCommand"];
                 };
             };
         };
