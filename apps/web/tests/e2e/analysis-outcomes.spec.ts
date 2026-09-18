@@ -82,6 +82,8 @@ test('AI empty result stays separate from failures and contains no fallback cand
   await expect(page.getByRole('link', { name: '手工创建动作' })).toBeVisible()
   await expect(page.locator('.completion-card')).toHaveCount(0)
   await expect(page.getByText('这次没有分析成功', { exact: true })).toHaveCount(0)
+  await page.goto('/train')
+  await expect(page.locator('.saved-row')).toHaveCount(0)
 })
 
 test('AI system failure offers retry and contains no fallback candidate', async ({ page }) => {
@@ -92,6 +94,8 @@ test('AI system failure offers retry and contains no fallback candidate', async 
   await expect(page.getByRole('button', { name: '重试分析' })).toBeVisible()
   await expect(page.locator('.completion-card')).toHaveCount(0)
   await expect(page.getByText('没有足够可靠的动作证据', { exact: true })).toHaveCount(0)
+  await page.goto('/train')
+  await expect(page.locator('.saved-row')).toHaveCount(0)
 })
 
 test('AI capacity exhaustion shows Retry-After and the labelled quick path', async ({ page }) => {

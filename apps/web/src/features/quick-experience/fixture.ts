@@ -31,6 +31,7 @@ export function createQuickExperienceDraftItems(
   return QUICK_ACTIONS.map((action) => ({
     id: createId(),
     name: action.name,
+    origin: 'quick_experience',
     sourceRef: null,
     segment: { value: null, source: null },
     mode: action.mode,

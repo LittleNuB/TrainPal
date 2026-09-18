@@ -16,8 +16,9 @@ const setup = () => {
   const name = `hachimi-fitness-library-${crypto.randomUUID()}`
   databases.push(name)
   const database = createHachimiDatabase(name)
+  let planSequence = 0
   const library = createDexieLibraryRepository(database, {
-    createId: () => 'plan-b',
+    createId: () => ++planSequence === 1 ? 'plan-b' : `plan-${planSequence}`,
     now: () => new Date('2026-07-21T01:00:00.000Z'),
   })
   return { database, draftRepository: createDexieDraftRepository(database), library }
@@ -36,6 +37,23 @@ afterEach(async () => {
 })
 
 describe('training library repository', () => {
+  it('recovers a legacy draft once, preserving values and removing legacy role fields from public snapshots', async () => {
+    const { database, draftRepository, library } = setup()
+    const legacy = draft()
+    legacy.items[0]!.sets = { value: 7, source: 'user' }
+    Object.assign(legacy.items[0]!, { segmentRole: 'execution' })
+    // Seed an older version's record; assertions use the public repositories.
+    await database.drafts.put(legacy)
+    const recovered = await draftRepository.load()
+    expect(recovered?.linkedPlanId).toBeTruthy()
+    expect(recovered?.items[0]!.sets).toEqual({ value: 7, source: 'user' })
+    expect(recovered?.items[0]).not.toHaveProperty('segmentRole')
+    expect((await library.listPlans())[0]?.items[0]).not.toHaveProperty('segmentRole')
+    expect((await draftRepository.load())?.linkedPlanId).toBe(recovered?.linkedPlanId)
+    expect(await library.listPlans()).toHaveLength(1)
+    database.close()
+  })
+
   it('saves as a named plan and directs later draft edits to that plan', async () => {
     const { database, draftRepository, library } = setup()
     await draftRepository.save(draft())
@@ -52,7 +70,7 @@ describe('training library repository', () => {
     database.close()
   })
 
-  it('opens a saved plan as current and can replace it with an unlinked quick sample', async () => {
+  it('opens a saved plan as current and archives a selected quick sample separately', async () => {
     const { database, draftRepository, library } = setup()
     await draftRepository.save(draft())
     await library.saveCurrentDraftAs('手臂计划 A')
@@ -64,12 +82,12 @@ describe('training library repository', () => {
       name: '8 分钟手臂唤醒',
       items: createQuickExperienceDraftItems(() => crypto.randomUUID()),
     })
-    expect(quick.linkedPlanId).toBeNull()
+    expect(quick.linkedPlanId).toBe('plan-2')
     expect((await database.plans.get('plan-b'))?.name).toBe('手臂计划 A')
     database.close()
   })
 
-  it('deletes a saved plan while retaining and unlinking its current draft', async () => {
+  it('deletes a saved plan and closes its current editor', async () => {
     const { database, draftRepository, library } = setup()
     await draftRepository.save(draft())
     const saved = await library.saveCurrentDraftAs('手臂计划 A')
@@ -78,7 +96,7 @@ describe('training library repository', () => {
 
     expect(await database.plans.get(saved.plan.id)).toBeUndefined()
     expect(unlinked?.linkedPlanId).toBeNull()
-    expect(unlinked?.items).toEqual(saved.draft.items)
+    expect(unlinked?.items).toEqual([])
     expect((await database.drafts.get('current'))?.linkedPlanId).toBeNull()
     database.close()
   })
