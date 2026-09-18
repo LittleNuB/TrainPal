@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AnalysisCandidate, DraftPlan, DraftRepository } from '@/domain/types'
+import { playbackFingerprint } from '@/domain/playback'
 import { useDraftStore } from '@/stores/draft'
 
 class MemoryDraftRepository implements DraftRepository {
@@ -96,6 +97,42 @@ describe('方案草稿 store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.useFakeTimers()
+  })
+
+  it('syncs only a matching saved playback selection while preserving later manual values', async () => {
+    const repository = new MemoryDraftRepository()
+    const store = useDraftStore()
+    await store.load(repository)
+    store.applyCandidateProposal([candidate('a')])
+    store.plan.linkedPlanId = 'saved-plan'
+    const item = store.items[0]!
+    const fingerprint = playbackFingerprint(item)
+    store.updateValue(item.id, 'reps', 19)
+
+    expect(store.syncSavedPlaybackSelection({
+      planId: 'saved-plan', itemId: item.id, fingerprint, range: item.segment.value,
+    })).toBe(true)
+    await store.flushPersist()
+    await store.reload()
+    expect(store.items[0]!.reps).toEqual({ value: 19, source: 'user' })
+    expect(store.items[0]!.playbackSelection).toEqual({ start_seconds: 41, end_seconds: 51 })
+  })
+
+  it.each(['plan', 'source', 'selection'] as const)('rejects a late playback sync after the %s changes', async (changed) => {
+    const store = useDraftStore()
+    await store.load(new MemoryDraftRepository())
+    store.applyCandidateProposal([candidate('a')])
+    store.plan.linkedPlanId = 'saved-plan'
+    const item = store.items[0]!
+    const fingerprint = playbackFingerprint(item)
+    if (changed === 'plan') store.plan.linkedPlanId = 'another-plan'
+    if (changed === 'source') item.sourceRef!.sourceId = 'another-source'
+    if (changed === 'selection') item.playbackSelection = { start_seconds: 41, end_seconds: 51 }
+    const before = JSON.stringify(store.plan)
+    expect(store.syncSavedPlaybackSelection({
+      planId: 'saved-plan', itemId: item.id, fingerprint, range: null,
+    })).toBe(false)
+    expect(JSON.stringify(store.plan)).toBe(before)
   })
 
   it('preserves source tips, alternatives and ranges across acceptance, editing and reload', async () => {

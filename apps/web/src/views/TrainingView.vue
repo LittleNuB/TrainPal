@@ -15,6 +15,7 @@ import { fingerprintMatches, probeVideoDuration, SUPPORTED_LOCAL_MEDIA_TYPES } f
 import { toSafeOriginUrl } from '@/domain/source'
 import CoachMotion from '@/features/experience/CoachMotion.vue'
 import SourceTips from '@/features/experience/SourceTips.vue'
+import PlaybackControls from '@/features/experience/PlaybackControls.vue'
 import { currentPlaybackRange } from '@/domain/playback'
 import { derivePetState } from '@/features/experience/pet-state'
 import { useAnalysisStore } from '@/stores/analysis'
@@ -37,6 +38,7 @@ const localMediaError = ref('')
 const screenReaderAnnouncement = ref('')
 const coachCue = ref<CoachMotionCue | null>(null)
 const soundEnabled = ref(true)
+const playbackBusy = ref(false)
 let cueAudio: AudioContext | null = null
 let unduckTimer: ReturnType<typeof setTimeout> | null = null
 let originalVolume: number | null = null
@@ -196,6 +198,7 @@ const syncVideo = async (): Promise<void> => {
   const range = segment.value
   if (!element || !range) return
   if (document.hidden || leavePause) { element.pause(); return }
+  if (playbackBusy.value) return
   const looping = session.value?.flowVersion === 'watch-v1' && session.value.status === 'active'
   if (looping && (element.ended || element.currentTime >= range.end_seconds)) {
     element.currentTime = range.start_seconds
@@ -227,6 +230,7 @@ const keepVideoInSegment = (): void => {
   const range = segment.value
   if (!element || !range) return
   if (document.hidden || leavePause) { element.pause(); return }
+  if (playbackBusy.value) return
   if (element.currentTime >= range.end_seconds) {
     if (session.value?.flowVersion === 'watch-v1' && session.value.status === 'active' && !training.commandLocked) {
       element.currentTime = range.start_seconds
@@ -642,7 +646,7 @@ onBeforeUnmount(() => {
             v-else-if="session.status === 'paused' || session.status === 'ready_to_continue'"
             type="button"
             class="primary-action"
-            :disabled="commandPending || training.commandLocked"
+            :disabled="commandPending || training.commandLocked || playbackBusy"
             @click="startOrContinue"
           >
             {{ startActionLabel }}
@@ -693,6 +697,7 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </details>
+          <PlaybackControls :video="video" @busy="playbackBusy = $event" @resume="startOrContinue" />
         </section>
       </div>
 

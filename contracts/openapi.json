@@ -873,6 +873,28 @@
         "title": "ParameterConflict",
         "type": "object"
       },
+      "PlaybackChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "option_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Option Id"
+          }
+        },
+        "required": [
+          "option_id"
+        ],
+        "title": "PlaybackChoice",
+        "type": "object"
+      },
       "ReadyResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1088,6 +1110,21 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VoiceCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "maxLength": 240,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "VoiceCommand",
         "type": "object"
       }
     }
@@ -1673,6 +1710,126 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/api/v1/playback-adjustments": {
+      "post": {
+        "operationId": "select_playback_api_v1_playback_adjustments_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "action_name": {
+                    "maxLength": 120,
+                    "minLength": 1,
+                    "title": "Action Name",
+                    "type": "string"
+                  },
+                  "instruction": {
+                    "maxLength": 240,
+                    "minLength": 1,
+                    "title": "Instruction",
+                    "type": "string"
+                  },
+                  "options": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "end_seconds": {
+                          "exclusiveMinimum": 0.0,
+                          "title": "End Seconds",
+                          "type": "number"
+                        },
+                        "id": {
+                          "maxLength": 64,
+                          "minLength": 1,
+                          "title": "Id",
+                          "type": "string"
+                        },
+                        "label": {
+                          "maxLength": 160,
+                          "minLength": 1,
+                          "title": "Label",
+                          "type": "string"
+                        },
+                        "start_seconds": {
+                          "minimum": 0.0,
+                          "title": "Start Seconds",
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "start_seconds",
+                        "end_seconds",
+                        "id",
+                        "label"
+                      ],
+                      "title": "PlaybackOption",
+                      "type": "object"
+                    },
+                    "maxItems": 16,
+                    "minItems": 1,
+                    "title": "Options",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "action_name",
+                  "instruction",
+                  "options"
+                ],
+                "title": "PlaybackRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaybackChoice"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Select Playback"
+      }
+    },
+    "/api/v1/playback-voice": {
+      "post": {
+        "operationId": "transcribe_playback_api_v1_playback_voice_post",
+        "requestBody": {
+          "content": {
+            "audio/wav": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "Single-channel 16-bit 16000 Hz PCM WAV, at most 15 seconds and 480044 bytes.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceCommand"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Transcribe Playback"
       }
     },
     "/api/v1/ready": {

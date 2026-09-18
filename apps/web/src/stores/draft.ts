@@ -21,6 +21,7 @@ import type {
 } from '@/domain/types'
 import { toSafeOriginUrl } from '@/domain/source'
 import { normalizeDraftItems } from '@/domain/plan'
+import { playbackFingerprint, validSelection } from '@/domain/playback'
 import { QUICK_EXPERIENCE_PLAN_NAME } from '@/features/quick-experience/fixture'
 import {
   fingerprintDraftPlan,
@@ -180,6 +181,19 @@ export const useDraftStore = defineStore('draft', () => {
     personalization.proposal = null
     plan.value.personalization = personalization
     schedulePersist()
+  }
+
+  function syncSavedPlaybackSelection(input: {
+    planId: string | null; itemId: string; fingerprint: string; range: Segment | null
+  }): boolean {
+    if ((plan.value.linkedPlanId ?? null) !== input.planId) return false
+    const item = items.value.find((entry) => entry.id === input.itemId)
+    if (!item || playbackFingerprint(item) !== input.fingerprint || !validSelection(item, input.range)) return false
+    // Only reconcile the confirmed clip, never reload a stale whole-plan snapshot.
+    // New manual training values and a newly selected plan must remain intact.
+    item.playbackSelection = cloneJson(input.range)
+    markContentChanged()
+    return true
   }
 
   async function flushPersist(): Promise<void> {
@@ -553,6 +567,7 @@ export const useDraftStore = defineStore('draft', () => {
     adjustmentPending,
     load,
     reload,
+    syncSavedPlaybackSelection,
     flushPersist,
     retryPersist,
     quiescePersistence,
