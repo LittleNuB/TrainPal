@@ -38,9 +38,10 @@
 | --- | --- |
 | 根据个人情况调整组次、时长和休息，保护手动修改 | [Draft PR #19](https://github.com/LittleNuB/TrainPal/pull/19) |
 | 训练方案自动存档，切换或复制时保留原方案 | [Draft PR #20](https://github.com/LittleNuB/TrainPal/pull/20) |
-| 循环观看当前片段、准备倒数、同动作组间自动衔接 | 本地实现，待体验验收 · [#22](https://github.com/LittleNuB/TrainPal/issues/22) |
-| 留住视频里的训练要点，合并同一示范的重复结果并标出冲突 | 本地实现，待体验验收 · [#23](https://github.com/LittleNuB/TrainPal/issues/23) |
-| 用文字或单次语音调整观看片段，先预览再确认继续 | 本地实现，待体验验收 · [#24](https://github.com/LittleNuB/TrainPal/issues/24) |
+| 分析来源、语义去重、中文名称、视频要点与参数冲突 | [Draft PR #26](https://github.com/LittleNuB/TrainPal/pull/26)，真实识别质量仍有待改项 |
+| 已确认的响应式界面与可拖动小猫 | [Draft PR #27](https://github.com/LittleNuB/TrainPal/pull/27) |
+| 循环观看当前片段、准备倒数、同动作组间自动衔接 | [Draft PR #28](https://github.com/LittleNuB/TrainPal/pull/28)，待真机验收 |
+| 用文字或单次语音调整观看片段，先预览再确认继续 | [Draft PR #29](https://github.com/LittleNuB/TrainPal/pull/29)，真人语音尚未通过验收 |
 
 [查看本轮规格与验收进展 →](https://github.com/LittleNuB/TrainPal/issues/21)
 
@@ -68,6 +69,8 @@ pnpm dev
 要运行真实分析，请在 `.env.local` 配置 `ARK_API_KEY`、`VOLC_ASR_API_KEY` 与对应模型，并按运行环境准备 FFmpeg。可用配置见 [.env.example](.env.example)。密钥仅供后端读取，不要放进前端代码或提交到 Git。
 
 示例配置将视频时长限制为 300 秒，文件大小限制为 256 MiB。实际可用上限以运行服务返回的能力为准；超过上限需先自行裁剪，受控示例视频也需单独配置媒体清单。
+
+本轮验收分支的 `pnpm dev:api` 仅监听本机，使用单片 90 秒、证据 590 秒、整次运行 600 秒的超时预算；它们是等待上限，不是速度承诺。进程环境变量可覆盖本地预算，生产入口与预算不随此改变。手机语音另需经过授权的安全 HTTPS 环境；桌面测试通过不代表手机语音可用。
 
 ## 视频和训练数据放在哪里
 
