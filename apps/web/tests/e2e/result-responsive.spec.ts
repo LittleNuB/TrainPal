@@ -15,7 +15,7 @@ test('completed result keeps mobile details optional and uses the desktop summar
     await editor.getByRole('button', { name: '完成', exact: true }).click()
   }
   await page.getByRole('button', { name: '开始训练', exact: true }).click()
-  await page.getByRole('button', { name: '开始本组', exact: true }).click()
+  await page.getByRole('button', { name: '准备好了', exact: true }).click()
   for (let index = 0; index < 3; index++) {
     if (index) await page.getByRole('button', { name: '准备好了', exact: true }).click()
     await page.getByRole('button', { name: '完成本组', exact: true }).click()

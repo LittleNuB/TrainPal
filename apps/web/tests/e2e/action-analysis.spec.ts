@@ -100,7 +100,7 @@ test('video result becomes a base plan, resolves uncertainty, and restores from 
   await expect(page.getByRole('heading', { name: '拖拽弯举' })).toBeVisible()
   await expect(page.locator('.media-stage video')).toBeVisible()
 
-  await page.getByRole('button', { name: '开始本组' }).click()
+  await page.getByRole('button', { name: '准备好了' }).click()
   await expect(page.getByText('本组进行中', { exact: true }).first()).toBeVisible()
   await page.reload()
   await expect(page.getByText(/已恢复并暂停|训练已暂停/, { exact: true }).first()).toBeVisible()

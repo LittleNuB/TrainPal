@@ -1,6 +1,7 @@
 import type { HachimiDatabase } from '@/db/hachimi-database'
 import { database } from '@/db/hachimi-database'
 import type { TrainingProfile, TrainingRecord, TrainingSession } from '@/domain/training'
+import { playbackFingerprint } from '@/domain/playback'
 import { localDataEpochFence, type LocalDataEpochFence } from '@/local-data/epoch-fence'
 
 export type CreateCurrentResult =
@@ -8,6 +9,7 @@ export type CreateCurrentResult =
   | { status: 'exists'; session: TrainingSession }
 
 export type TrainingCommit = {
+  persistPlayback?: boolean
   sessionId: string
   expectedRevision: number
 } & (
@@ -59,7 +61,7 @@ export const createDexieTrainingRepository = (
 
   async commit(change) {
     writeFence.assertWritable()
-    return db.transaction('rw', db.sessions, db.records, async () => {
+    return db.transaction('rw', [db.sessions, db.records, db.plans, db.drafts], async () => {
       const existingRecord = await db.records.get(change.sessionId)
       if (existingRecord) {
         return { status: 'already_finalized' as const, record: existingRecord }
@@ -88,6 +90,29 @@ export const createDexieTrainingRepository = (
         throw new Error('invalid training session commit')
       }
 
+      if (change.persistPlayback) {
+        const before = current.plan.items[current.currentItemIndex]
+        const after = change.nextSession.plan.items[current.currentItemIndex]
+        const planId = current.plan.sourcePlanId
+        if (planId) {
+          const saved = await db.plans.get(planId)
+          const savedItem = saved?.items.find((item) => item.id === before.id)
+          if (!saved || !savedItem || playbackFingerprint(savedItem) !== playbackFingerprint(before)) {
+            return { status: 'conflict' as const, session: current }
+          }
+          savedItem.playbackSelection = structuredClone(after.playbackSelection ?? null)
+          await db.plans.put({ ...saved, updatedAt: change.nextSession.updatedAt })
+          const draft = await db.drafts.get('current')
+          if (draft?.linkedPlanId === planId) {
+            const draftItem = draft.items.find((item) => item.id === before.id)
+            if (!draftItem || playbackFingerprint(draftItem) !== playbackFingerprint(before)) {
+              throw new Error('draft changed during playback adjustment')
+            }
+            draftItem.playbackSelection = structuredClone(after.playbackSelection ?? null)
+            await db.drafts.put({ ...draft, revision: (draft.revision ?? 0) + 1, updatedAt: change.nextSession.updatedAt })
+          }
+        }
+      }
       await db.sessions.put(change.nextSession)
       return { status: 'committed' as const, session: change.nextSession, record: null }
     })

@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
-import type { DraftPlan } from '@/domain/types'
+import type { DraftPlan, Segment } from '@/domain/types'
 import type { CoachStyleId } from '@/domain/coach'
 import type {
   PlanSnapshot,
@@ -60,7 +60,7 @@ export const useTrainingStore = defineStore('training', () => {
     }
 
     if (result.session) {
-      session.value = result.code === 'session_conflict' && result.session.status === 'active'
+      session.value = result.code === 'session_conflict' && ['active', 'countdown', 'resting'].includes(result.session.status)
         ? {
             ...result.session,
             status: 'paused',
@@ -71,7 +71,7 @@ export const useTrainingStore = defineStore('training', () => {
     }
     if (
       result.code === 'storage_unavailable'
-      && session.value?.status === 'active'
+      && session.value && ['active', 'countdown', 'resting'].includes(session.value.status)
     ) {
       session.value = {
         ...session.value,
@@ -135,6 +135,7 @@ export const useTrainingStore = defineStore('training', () => {
         type: 'session.create',
         plan: snapshot,
         coachStyleId,
+        flowVersion: 'watch-v1',
       })
       return applyResult(result)
     })
@@ -175,6 +176,13 @@ export const useTrainingStore = defineStore('training', () => {
     sessionId: current.sessionId,
     expectedRevision: current.revision,
   }))
+
+  const prepareSet = () => runVersioned((current) => ({
+    type: 'set.prepare', sessionId: current.sessionId, expectedRevision: current.revision,
+  }))
+
+  const selectPlayback = (input: { sessionId: string; expectedRevision: number; itemId: string; fingerprint: string; range: Segment | null }) =>
+    runVersioned(() => ({ type: 'playback.select', ...input }))
 
   const tick = () => runVersioned((current) => ({
     type: 'clock.tick',
@@ -250,6 +258,8 @@ export const useTrainingStore = defineStore('training', () => {
     restore,
     createFromDraft,
     startSet,
+    prepareSet,
+    selectPlayback,
     tick,
     pause,
     completeSet,

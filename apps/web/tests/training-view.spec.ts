@@ -185,6 +185,7 @@ const mountTraining = async (pinia: ReturnType<typeof createPinia>) => {
 describe('训练页合同', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     vi.useRealTimers()
   })
 
@@ -208,6 +209,43 @@ describe('训练页合同', () => {
     const wrapper = await mountTraining(pinia)
 
     expect(wrapper.get('button.primary-action').text()).toBe('继续训练')
+    wrapper.unmount()
+  })
+
+  it('starts preparation even when optional countdown audio cannot initialize', async () => {
+    vi.stubGlobal('AudioContext', class { constructor() { throw new Error('audio unavailable') } })
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const current = trainingSession('paused')
+    current.flowVersion = 'watch-v1'
+    current.pauseReason = 'before_start'
+    const engine = new SessionEngine(current)
+    await useTrainingStore().load(engine)
+    const wrapper = await mountTraining(pinia)
+    await wrapper.get('button.primary-action').trigger('click')
+    await flushPromises()
+    expect(engine.commands.some(command => command.type === 'set.prepare')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('loops the watch-flow reference without changing set progress', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const current = trainingSession('active')
+    current.flowVersion = 'watch-v1'
+    current.plan.items[0]!.sourceRef = { sourceId: source.id }
+    current.plan.items[0]!.segment = { value: { start_seconds: 4, end_seconds: 12 }, source: 'video' }
+    await useTrainingStore().load(new SessionEngine(current))
+    useAnalysisStore().sources = [source]
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)
+    const wrapper = await mountTraining(pinia)
+    const media = wrapper.get<HTMLVideoElement>('video')
+    media.element.currentTime = 12
+    await media.trigger('timeupdate')
+    expect(media.element.currentTime).toBe(4)
+    expect(play).toHaveBeenCalled()
+    expect(useTrainingStore().session?.progress[0]?.completedSets).toBe(0)
     wrapper.unmount()
   })
 

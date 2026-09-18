@@ -80,7 +80,7 @@ export const createTrainPalRoutes = (includeDesignGallery: boolean): RouteRecord
       shell: 'immersive',
       theme: 'training',
       showBottomNav: false,
-      showAnalysisTask: true,
+      showAnalysisTask: false,
       showTrainingTask: false,
       title: '训练中',
     },
