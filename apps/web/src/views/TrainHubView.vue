@@ -143,7 +143,7 @@ onMounted(async () => {
     <section v-else-if="draft.items.length" class="focus-card current-plan tp-card">
       <p class="tp-kicker">继续准备</p>
       <h2>{{ draft.plan.name }}</h2>
-      <p>方案已保存在本机。开始前，可以修改动作、组数和休息时间。</p>
+      <p>开始前，可以修改动作、组数和休息时间。</p>
       <div class="focus-stats">
         <span><b>{{ draft.items.length }}</b> 个动作</span>
         <span>约 {{ currentPlanMinutes || '—' }} 分钟</span>
