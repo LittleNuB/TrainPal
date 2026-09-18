@@ -83,6 +83,11 @@ const fromCandidate = (
   return {
     id: id(),
     name: candidate.name,
+    sourceParameters: cloneJson(candidate.parameters),
+    sourceEvidence: cloneJson(candidate.evidence),
+    sourceTips: cloneJson(candidate.tips ?? []),
+    playbackOptions: cloneJson(candidate.playback_options ?? []),
+    parameterConflicts: cloneJson(candidate.parameter_conflicts ?? []),
     sourceRef: {
       sourceId: candidate.source_id,
       title: source?.title,
@@ -102,7 +107,9 @@ const fromCandidate = (
     reps: isReps
       ? candidate.parameters.reps === null
         ? sourced(10, 'rule')
-        : sourced(candidate.parameters.reps, 'video')
+        : sourced(candidate.parameters.reps,
+          candidate.parameters.reps_max != null && candidate.parameters.reps_max > candidate.parameters.reps
+            ? 'rule' : 'video')
       : sourced<number>(null, null),
     durationSeconds: !isReps
       ? candidate.parameters.duration_seconds === null

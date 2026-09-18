@@ -22,6 +22,8 @@ from hakimi_analysis.models import (
     EvidenceSpan,
     EvidenceType,
     Segment,
+    SourceClip,
+    SourceTip,
 )
 from hakimi_analysis.observability import ALLOWED_LOG_FIELDS
 from hakimi_analysis.pipeline import EmitCallback, PipelineFailure, PipelineOutput
@@ -83,6 +85,16 @@ class RelativeCandidatePipeline:
                         )
                     ],
                     needs_confirmation=False,
+                    tips=[
+                        SourceTip(
+                            text="保持呼吸",
+                            category="breathing",
+                            evidence=EvidenceSpan(
+                                type=EvidenceType.VISUAL, start_seconds=1.5, end_seconds=2.5
+                            ),
+                        )
+                    ],
+                    playback_options=[SourceClip(label="动作示范", start_seconds=1, end_seconds=3)],
                 )
             ]
         )
@@ -857,6 +869,16 @@ async def test_local_range_upload_returns_absolute_candidate_times_and_cleans_me
     candidate = completed["candidates"][0]  # type: ignore[index]
     assert candidate["source_id"] == LOCAL_SOURCE_ID
     assert candidate["segment"] == {"start_seconds": 11.0, "end_seconds": 13.0}
+    assert candidate["tips"][0]["evidence"] == {
+        "type": "visual",
+        "start_seconds": 11.5,
+        "end_seconds": 12.5,
+    }
+    assert candidate["playback_options"][0] == {
+        "label": "动作示范",
+        "start_seconds": 11.0,
+        "end_seconds": 13.0,
+    }
     assert candidate["evidence"] == [
         {"type": "visual", "start_seconds": 11.25, "end_seconds": 12.75}
     ]

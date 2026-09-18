@@ -1,8 +1,10 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 import pytest
 
 from hakimi_analysis.media import AnalysisWindow, PreparedMedia, PreparedVisualChunk
@@ -22,9 +24,69 @@ from hakimi_analysis.orchestration import (
     SkillRepository,
     build_visual_chunks,
 )
+from hakimi_analysis.providers.ark import ArkResponsesClient
 from hakimi_analysis.providers.base import ProviderError
 from hakimi_analysis.runs import AnalysisRunManager
+from hakimi_analysis.semantic_fusion import SemanticCandidateFusion
 from hakimi_analysis.sources import VideoSource
+
+
+@pytest.mark.asyncio
+async def test_pipeline_publishes_the_semantically_grouped_result(tmp_path: Path) -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={
+                    "output_text": json.dumps(
+                        {
+                            "groups": [
+                                {
+                                    "member_ids": ["speech-1", "visual-1"],
+                                    "name": "哑铃拖拽弯举",
+                                    "relation": "same_demonstration",
+                                }
+                            ]
+                        }
+                    )
+                },
+            )
+        )
+    ) as client:
+        fusion = SemanticCandidateFusion(
+            model=ArkResponsesClient(
+                api_key="test", model_id="text", base_url="https://ark.test", http_client=client
+            ),
+            instructions="Group evidence.",
+        )
+        pipeline = OrchestratedAnalysisPipeline(
+            media=FakeMediaProcessor(tmp_path),
+            asr=FakeAsr(),
+            ark=FakeArk(),
+            skills=SkillRepository(
+                speech_instructions="speech",
+                speech_version="1",
+                visual_instructions="visual",
+                visual_version="1",
+                fusion_instructions="fusion",
+                fusion_version="2",
+            ),
+            semantic_fusion=fusion,
+        )
+
+        async def emit(_stage: RunStage, _event: str, _data: dict[str, object]) -> None:
+            return None
+
+        result = await pipeline.analyze(
+            VideoSource(
+                id="source-a", title="fixture", path=tmp_path / "fixture.mp4", duration_seconds=60
+            ),
+            None,
+            emit,
+        )
+    assert len(result.candidates) == 1
+    assert result.candidates[0].name == "哑铃拖拽弯举"
+    assert [span.type for span in result.candidates[0].evidence] == ["speech", "visual"]
 
 
 class FakeMediaProcessor:
@@ -438,9 +500,9 @@ def test_visual_chunk_windows_cover_the_complete_source_with_bounded_overlap() -
 def test_skill_repository_loads_all_three_versioned_contracts() -> None:
     repository = SkillRepository.load(Path(__file__).parents[3] / "skills")
 
-    assert repository.speech_version == "1.4.0"
-    assert repository.visual_version == "1.4.1"
-    assert repository.fusion_version == "1.2.0"
+    assert repository.speech_version == "1.6.0"
+    assert repository.visual_version == "1.6.0"
+    assert repository.fusion_version == "2.1.0"
     assert "continuous video clip" in repository.visual_instructions
     assert "clip-local" in repository.visual_instructions
     assert "contact sheet" not in repository.visual_instructions.casefold()
@@ -585,9 +647,10 @@ async def test_range_source_keeps_pipeline_results_on_the_analysis_range_clock(
     assert ark.speech_windows == [Segment(start_seconds=0, end_seconds=10)]
     assert ark.visual_windows == [Segment(start_seconds=0, end_seconds=10)]
     assert output.candidates[0].segment == Segment(start_seconds=1, end_seconds=4)
-    assert {
-        (span.start_seconds, span.end_seconds) for span in output.candidates[0].evidence
-    } == {(1, 3), (2, 4)}
+    assert {(span.start_seconds, span.end_seconds) for span in output.candidates[0].evidence} == {
+        (1, 3),
+        (2, 4),
+    }
 
 
 @pytest.mark.asyncio
@@ -612,9 +675,7 @@ async def test_range_failure_keeps_pipeline_gap_on_the_analysis_range_clock(
     output = await pipeline.analyze(range_source, None, no_op_emit)
 
     assert output.coverage_status == CoverageStatus.INSUFFICIENT
-    assert [(gap.start_seconds, gap.end_seconds) for gap in output.coverage_gaps] == [
-        (0, 10)
-    ]
+    assert [(gap.start_seconds, gap.end_seconds) for gap in output.coverage_gaps] == [(0, 10)]
 
 
 @pytest.mark.asyncio
@@ -650,8 +711,7 @@ async def test_run_manager_offsets_orchestrated_range_results_to_the_source_cloc
     assert completed.status.value == "completed"
     assert completed.candidates[0].segment == Segment(start_seconds=11, end_seconds=14)
     assert {
-        (span.start_seconds, span.end_seconds)
-        for span in completed.candidates[0].evidence
+        (span.start_seconds, span.end_seconds) for span in completed.candidates[0].evidence
     } == {(11, 13), (12, 14)}
 
 
@@ -687,9 +747,7 @@ async def test_run_manager_offsets_orchestrated_range_gaps_to_the_source_clock(
 
     assert completed.status.value == "completed"
     assert completed.coverage_status == CoverageStatus.INSUFFICIENT
-    assert [(gap.start_seconds, gap.end_seconds) for gap in completed.coverage_gaps] == [
-        (10, 20)
-    ]
+    assert [(gap.start_seconds, gap.end_seconds) for gap in completed.coverage_gaps] == [(10, 20)]
 
 
 @pytest.mark.asyncio
@@ -719,7 +777,7 @@ async def test_slow_speech_branch_returns_visual_evidence_with_warning(tmp_path:
 
     output = await pipeline.analyze(source(tmp_path), None, no_op_emit)
 
-    assert output.candidates[0].name == "Drag Curl"
+    assert output.candidates[0].name == "拖拽弯举"
     assert output.candidates[0].needs_confirmation is True
     assert [warning.code for warning in output.warnings] == ["speech_unavailable"]
 

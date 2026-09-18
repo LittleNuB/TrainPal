@@ -70,8 +70,23 @@
             "title": "Needs Confirmation",
             "type": "boolean"
           },
+          "parameter_conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/ParameterConflict"
+            },
+            "title": "Parameter Conflicts",
+            "type": "array"
+          },
           "parameters": {
             "$ref": "#/components/schemas/CandidateParameters"
+          },
+          "playback_options": {
+            "items": {
+              "$ref": "#/components/schemas/SourceClip"
+            },
+            "maxItems": 12,
+            "title": "Playback Options",
+            "type": "array"
           },
           "segment": {
             "$ref": "#/components/schemas/Segment"
@@ -79,6 +94,14 @@
           "source_id": {
             "title": "Source Id",
             "type": "string"
+          },
+          "tips": {
+            "items": {
+              "$ref": "#/components/schemas/SourceTip"
+            },
+            "maxItems": 3,
+            "title": "Tips",
+            "type": "array"
           }
         },
         "required": [
@@ -246,7 +269,9 @@
           "code": {
             "enum": [
               "speech_unavailable",
-              "visual_unavailable"
+              "visual_unavailable",
+              "semantic_fusion_unavailable",
+              "semantic_fusion_conflict"
             ],
             "title": "Code",
             "type": "string"
@@ -356,6 +381,18 @@
               }
             ],
             "title": "Reps"
+          },
+          "reps_max": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reps Max"
           },
           "rest_seconds": {
             "anyOf": [
@@ -785,6 +822,57 @@
         "title": "NotReadyResponse",
         "type": "object"
       },
+      "ParameterAlternative": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceSpan"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/CandidateParameters"
+          }
+        },
+        "required": [
+          "parameters",
+          "evidence"
+        ],
+        "title": "ParameterAlternative",
+        "type": "object"
+      },
+      "ParameterConflict": {
+        "additionalProperties": false,
+        "properties": {
+          "alternatives": {
+            "items": {
+              "$ref": "#/components/schemas/ParameterAlternative"
+            },
+            "minItems": 2,
+            "title": "Alternatives",
+            "type": "array"
+          },
+          "field": {
+            "enum": [
+              "mode",
+              "sets",
+              "reps",
+              "duration_seconds",
+              "rest_seconds"
+            ],
+            "title": "Field",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "alternatives"
+        ],
+        "title": "ParameterConflict",
+        "type": "object"
+      },
       "ReadyResponse": {
         "additionalProperties": false,
         "properties": {
@@ -846,6 +934,34 @@
         "title": "Segment",
         "type": "object"
       },
+      "SourceClip": {
+        "additionalProperties": false,
+        "properties": {
+          "end_seconds": {
+            "exclusiveMinimum": 0.0,
+            "title": "End Seconds",
+            "type": "number"
+          },
+          "label": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "start_seconds": {
+            "minimum": 0.0,
+            "title": "Start Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "start_seconds",
+          "end_seconds",
+          "label"
+        ],
+        "title": "SourceClip",
+        "type": "object"
+      },
       "SourceSummary": {
         "additionalProperties": false,
         "properties": {
@@ -884,6 +1000,38 @@
           "duration_seconds"
         ],
         "title": "SourceSummary",
+        "type": "object"
+      },
+      "SourceTip": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "enum": [
+              "setup",
+              "path",
+              "breathing",
+              "rhythm",
+              "caution"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/EvidenceSpan"
+          },
+          "text": {
+            "maxLength": 80,
+            "minLength": 2,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "category",
+          "evidence"
+        ],
+        "title": "SourceTip",
         "type": "object"
       },
       "UpgradeAccessSessionRequest": {

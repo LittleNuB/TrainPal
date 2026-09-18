@@ -98,6 +98,36 @@ describe('方案草稿 store', () => {
     vi.useFakeTimers()
   })
 
+  it('preserves source tips, alternatives and ranges across acceptance, editing and reload', async () => {
+    const repository = new MemoryDraftRepository()
+    const store = useDraftStore()
+    await store.load(repository)
+    const original = candidate('a')
+    const enriched = {
+      ...original,
+      parameters: { ...original.parameters, reps: 8, reps_max: 12 },
+      tips: [{ text: '推起时呼气', category: 'breathing' as const, evidence: original.evidence[0]! }],
+      playback_options: [{ ...original.segment, label: '完整示范' }],
+      parameter_conflicts: [{ field: 'reps' as const, alternatives: [
+        { parameters: { ...original.parameters, reps: 8 }, evidence: [original.evidence[0]!] },
+        { parameters: { ...original.parameters, reps: 12 }, evidence: [original.evidence[1]!] },
+      ] }],
+      needs_confirmation: true,
+    }
+    store.applyCandidateProposal([enriched])
+    expect(store.items[0]!.reps).toEqual({ value: 8, source: 'rule' })
+    store.updateValue(store.items[0]!.id, 'reps', 9)
+    await store.flushPersist()
+    await store.reload()
+    expect(store.items[0]!.sourceTips).toEqual(enriched.tips)
+    expect(store.items[0]!.sourceEvidence).toEqual(original.evidence)
+    expect(store.items[0]!.sourceParameters).toEqual(enriched.parameters)
+    expect(store.items[0]!.parameterConflicts).toEqual(enriched.parameter_conflicts)
+    expect(store.items[0]!.playbackOptions).toEqual(enriched.playback_options)
+    expect(store.items[0]!.reps).toEqual({ value: 9, source: 'user' })
+    expect(store.items[0]!.confirmationStatus).toBe('pending')
+  })
+
   it('stores local source fingerprints and repeated actions in source order without legacy roles', async () => {
     const store = useDraftStore()
     await store.load(new MemoryDraftRepository())

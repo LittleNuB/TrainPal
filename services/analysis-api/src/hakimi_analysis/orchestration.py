@@ -8,7 +8,10 @@ from time import monotonic
 from typing import Any, Protocol
 from uuid import uuid4
 
-from hakimi_analysis.fusion import CandidateFusionSkill
+from pydantic import ValidationError
+
+from hakimi_analysis.evidence_time import offset_tip
+from hakimi_analysis.fusion import CandidateFusionSkill, normalize_action_name
 from hakimi_analysis.media import (
     AnalysisWindow,
     LocalMediaProcessor,
@@ -18,6 +21,7 @@ from hakimi_analysis.media import (
 )
 from hakimi_analysis.models import (
     AnalysisWarning,
+    CandidateParameters,
     CoverageGap,
     CoverageGapReason,
     CoverageStatus,
@@ -32,6 +36,8 @@ from hakimi_analysis.models import (
 )
 from hakimi_analysis.pipeline import EmitCallback, PipelineFailure, PipelineOutput
 from hakimi_analysis.providers.base import ProviderError
+from hakimi_analysis.semantic_fusion import SemanticCandidateFusion
+from hakimi_analysis.source_tips import safe_tips
 from hakimi_analysis.sources import VideoSource
 
 
@@ -81,6 +87,7 @@ class ArkAnalyzer(Protocol):
         window: Segment,
         instructions: str,
     ) -> VisualLocalizationResult: ...
+
 
 @dataclass(frozen=True, slots=True)
 class SkillRepository:
@@ -166,12 +173,14 @@ class OrchestratedAnalysisPipeline:
         visual_overlap_seconds: float = 10,
         run_timeout_seconds: float = 180,
         completion_margin_seconds: float = 10,
+        semantic_fusion: SemanticCandidateFusion | None = None,
         clock: Callable[[], float] = monotonic,
     ) -> None:
         self._media = media
         self._asr = asr
         self._ark = ark
         self._skills = skills
+        self._semantic_fusion = semantic_fusion
         self._evidence_timeout_seconds = evidence_timeout_seconds
         self._visual_chunk_timeout_seconds = visual_chunk_timeout_seconds
         self._visual_chunk_seconds = visual_chunk_seconds
@@ -247,7 +256,11 @@ class OrchestratedAnalysisPipeline:
             ) from error
 
         speech_signals = speech_result if isinstance(speech_result, list) else []
-        visual_segments = _deduplicate_visual_segments(visual_results.segments)
+        visual_segments = (
+            visual_results.segments
+            if self._semantic_fusion is not None
+            else _deduplicate_visual_segments(visual_results.segments)
+        )
         coverage_gaps = _coverage_gaps(
             source.analysis_duration_seconds,
             visual_results.successful_windows,
@@ -286,12 +299,23 @@ class OrchestratedAnalysisPipeline:
                 "stage.changed",
                 {"skill_version": self._fusion.version},
             )
-            return PipelineOutput(
-                candidates=self._fusion.run(
+            if self._semantic_fusion is not None:
+                fused = await self._semantic_fusion.run(
                     source_id=source.id,
                     speech_signals=speech_signals,
                     visual_segments=visual_segments,
-                ),
+                    remaining_seconds=evidence_deadline - self._clock(),
+                )
+                candidates = fused.candidates
+                warnings.extend(fused.warnings)
+            else:
+                candidates = self._fusion.run(
+                    source_id=source.id,
+                    speech_signals=speech_signals,
+                    visual_segments=visual_segments,
+                )
+            return PipelineOutput(
+                candidates=candidates,
                 warnings=warnings,
                 coverage_status=(
                     CoverageStatus.PARTIAL if coverage_gaps else CoverageStatus.COMPLETE
@@ -401,9 +425,7 @@ class OrchestratedAnalysisPipeline:
                 )
                 failures.append((window, unexpected_error))
             else:
-                segments.extend(
-                    _offset_visual_segments(result.segments, window.start_seconds)
-                )
+                segments.extend(_offset_visual_segments(result.segments, window.start_seconds))
                 successful_windows.append(window)
                 processed_seconds = _covered_seconds(successful_windows)
                 await emit(
@@ -468,7 +490,7 @@ class OrchestratedAnalysisPipeline:
             "branch.completed",
             {"branch": "speech", "evidence_count": len(result.signals)},
         )
-        return result.signals
+        return [signal for signal in result.signals if signal.is_training_content]
 
 
 def _covered_seconds(windows: list[AnalysisWindow]) -> float:
@@ -507,8 +529,7 @@ def _coverage_gaps(
             continue
         midpoint = (start_seconds + end_seconds) / 2
         if any(
-            window.start_seconds <= midpoint < window.end_seconds
-            for window in successful_windows
+            window.start_seconds <= midpoint < window.end_seconds for window in successful_windows
         ):
             continue
         error = next(
@@ -542,10 +563,9 @@ def _offset_visual_segments(
     return [
         segment.model_copy(
             update={
-                "start_seconds": (
-                    segment.start_seconds + analysis_window_offset_seconds
-                ),
+                "start_seconds": (segment.start_seconds + analysis_window_offset_seconds),
                 "end_seconds": segment.end_seconds + analysis_window_offset_seconds,
+                "tips": [offset_tip(tip, analysis_window_offset_seconds) for tip in segment.tips],
             }
         )
         for segment in segments
@@ -562,36 +582,51 @@ def _coverage_gap_reason(error: ProviderError) -> CoverageGapReason:
     return CoverageGapReason.UNKNOWN
 
 
-def _normalized_visual_action(name: str | None) -> str:
-    if name is None:
-        return ""
-    return "".join(character for character in name.casefold() if character.isalnum())
+def _merge_visual_segments(previous: VisualSegment, current: VisualSegment) -> VisualSegment | None:
+    parameters: dict[str, Any] = {}
+    for segment in (previous, current):
+        if segment.text_parameters is None:
+            continue
+        for field, value in segment.text_parameters.model_dump(exclude_none=True).items():
+            if field in parameters and parameters[field] != value:
+                return None
+            parameters[field] = value
+    try:
+        merged_parameters = CandidateParameters.model_validate(parameters) if parameters else None
+    except ValidationError:
+        # Complementary fields can still be incompatible (e.g. reps and duration).
+        return None
+    return previous.model_copy(
+        update={
+            "start_seconds": min(previous.start_seconds, current.start_seconds),
+            "end_seconds": max(previous.end_seconds, current.end_seconds),
+            "segment_role": (
+                previous.segment_role
+                if previous.segment_role == current.segment_role
+                else SegmentRole.UNKNOWN
+            ),
+            "text_parameters": merged_parameters,
+            "tips": safe_tips([*previous.tips, *current.tips]),
+        }
+    )
 
 
 def _deduplicate_visual_segments(segments: list[VisualSegment]) -> list[VisualSegment]:
-    grouped: dict[str, list[VisualSegment]] = {}
+    grouped: dict[tuple[str, str | None], list[VisualSegment]] = {}
     ungrouped: list[VisualSegment] = []
     for segment in sorted(segments, key=lambda item: (item.start_seconds, item.end_seconds)):
-        action_key = _normalized_visual_action(segment.action_name)
+        if not segment.is_training_content:
+            continue
+        action_key = normalize_action_name(segment.action_name)
         if not action_key:
             ungrouped.append(segment)
             continue
-        action_segments = grouped.setdefault(action_key, [])
+        action_segments = grouped.setdefault((action_key, segment.sequence_label), [])
         if action_segments and segment.start_seconds <= action_segments[-1].end_seconds:
-            previous = action_segments[-1]
-            role = (
-                previous.segment_role
-                if previous.segment_role == segment.segment_role
-                else SegmentRole.UNKNOWN
-            )
-            action_segments[-1] = VisualSegment(
-                action_name=previous.action_name,
-                start_seconds=min(previous.start_seconds, segment.start_seconds),
-                end_seconds=max(previous.end_seconds, segment.end_seconds),
-                visual_cue=previous.visual_cue,
-                segment_role=role,
-            )
-            continue
+            merged = _merge_visual_segments(action_segments[-1], segment)
+            if merged is not None:
+                action_segments[-1] = merged
+                continue
         action_segments.append(segment)
     return sorted(
         [segment for action_segments in grouped.values() for segment in action_segments]
@@ -599,7 +634,7 @@ def _deduplicate_visual_segments(segments: list[VisualSegment]) -> list[VisualSe
         key=lambda item: (
             item.start_seconds,
             item.end_seconds,
-            _normalized_visual_action(item.action_name),
+            normalize_action_name(item.action_name),
             item.visual_cue,
         ),
     )

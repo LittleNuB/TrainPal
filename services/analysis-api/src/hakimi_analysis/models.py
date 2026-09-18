@@ -122,16 +122,41 @@ class CandidateParameters(StrictModel):
     mode: ActionMode | None = None
     sets: int | None = Field(default=None, ge=1)
     reps: int | None = Field(default=None, ge=1)
+    reps_max: int | None = Field(default=None, ge=1)
     duration_seconds: int | None = Field(default=None, ge=1)
     rest_seconds: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_mode(self) -> "CandidateParameters":
+        if self.reps_max is not None and (
+            self.reps is None or self.reps_max < self.reps or self.mode != ActionMode.REPS
+        ):
+            raise ValueError("repetition range requires ordered bounds and reps mode")
         if self.mode == ActionMode.REPS and self.duration_seconds is not None:
             raise ValueError("reps mode cannot include duration_seconds")
         if self.mode == ActionMode.DURATION and self.reps is not None:
             raise ValueError("duration mode cannot include reps")
         return self
+
+
+class SourceTip(StrictModel):
+    text: str = Field(min_length=2, max_length=80)
+    category: Literal["setup", "path", "breathing", "rhythm", "caution"]
+    evidence: EvidenceSpan
+
+
+class SourceClip(Segment):
+    label: str = Field(min_length=1, max_length=160)
+
+
+class ParameterAlternative(StrictModel):
+    parameters: CandidateParameters
+    evidence: list[EvidenceSpan]
+
+
+class ParameterConflict(StrictModel):
+    field: Literal["mode", "sets", "reps", "duration_seconds", "rest_seconds"]
+    alternatives: list[ParameterAlternative] = Field(min_length=2)
 
 
 class AnalysisCandidate(StrictModel):
@@ -142,9 +167,13 @@ class AnalysisCandidate(StrictModel):
     parameters: CandidateParameters
     evidence: list[EvidenceSpan]
     needs_confirmation: bool
+    parameter_conflicts: list[ParameterConflict] = Field(default_factory=list)
+    tips: list[SourceTip] = Field(default_factory=list, max_length=3)
+    playback_options: list[SourceClip] = Field(default_factory=list, max_length=12)
 
 
 class SpeechSignal(StrictModel):
+    tips: list[SourceTip] = Field(default_factory=list, max_length=3)
     action_name: str = Field(min_length=1)
     sets: int | None = Field(default=None, ge=1)
     reps: int | None = Field(default=None, ge=1)
@@ -154,6 +183,7 @@ class SpeechSignal(StrictModel):
     end_seconds: float = Field(gt=0)
     evidence_text: str = Field(min_length=1)
     segment_role: SegmentRole = SegmentRole.UNKNOWN
+    is_training_content: bool = True
 
 
 class SpeechUnderstandingResult(StrictModel):
@@ -161,11 +191,28 @@ class SpeechUnderstandingResult(StrictModel):
 
 
 class VisualSegment(StrictModel):
-    action_name: str | None = None
+    tips: list[SourceTip] = Field(default_factory=list, max_length=3)
+    action_name: str | None = Field(
+        default=None,
+        description=(
+            "Natural Chinese exercise name from clearly visible movement, retaining "
+            "grip/posture/equipment; null only if unidentifiable, not merely because "
+            "the caption omits a name."
+        ),
+    )
     start_seconds: float = Field(ge=0)
     end_seconds: float = Field(gt=0)
     visual_cue: str = Field(min_length=1)
     segment_role: SegmentRole = SegmentRole.UNKNOWN
+    text_parameters: CandidateParameters | None = None
+    sequence_label: str | None = Field(default=None, max_length=40)
+    is_training_content: bool = Field(
+        default=True,
+        description=(
+            "True only for a training instruction/demonstration; false for an introductory "
+            "hook, unrelated posing, promotion or end card even if a person is moving."
+        ),
+    )
 
 
 class VisualLocalizationResult(StrictModel):
@@ -267,7 +314,8 @@ class GymtiNarrativeSnapshotView(StrictModel):
 
 
 class AnalysisWarning(StrictModel):
-    code: Literal["speech_unavailable", "visual_unavailable"]
+    code: Literal["speech_unavailable", "visual_unavailable", "semantic_fusion_unavailable",
+                  "semantic_fusion_conflict"]
     message: str
 
 

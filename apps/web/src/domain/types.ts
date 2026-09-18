@@ -17,11 +17,15 @@ export interface CandidateParameters {
   mode: ActionMode | null
   sets: number | null
   reps: number | null
+  reps_max?: number | null
   duration_seconds: number | null
   rest_seconds: number | null
 }
 
 export interface AnalysisCandidate {
+  playback_options?: (Segment & { label: string })[]
+  tips?: SourceTip[]
+  parameter_conflicts?: ParameterConflict[]
   id: string
   name: string
   source_id: string
@@ -41,7 +45,7 @@ export type AccessSession = Omit<
 }
 
 export interface AnalysisWarning {
-  code: 'speech_unavailable' | 'visual_unavailable'
+  code: 'speech_unavailable' | 'visual_unavailable' | 'semantic_fusion_unavailable' | 'semantic_fusion_conflict'
   message: string
 }
 
@@ -130,10 +134,16 @@ export interface DraftSourceRef {
 }
 
 export interface DraftItem {
+  playbackOptions?: (Segment & { label: string })[]
+  playbackSelection?: Segment | null
+  sourceTips?: SourceTip[]
+  parameterConflicts?: ParameterConflict[]
   id: string
   name: string
   origin?: 'quick_experience'
   sourceRef: DraftSourceRef | null
+  sourceParameters?: CandidateParameters
+  sourceEvidence?: EvidenceSpan[]
   segment: SourcedValue<Segment>
   confirmationStatus?: 'confirmed' | 'pending'
   mode: ActionMode
@@ -143,6 +153,9 @@ export interface DraftItem {
   restSeconds: SourcedValue<number>
   weightKg: SourcedValue<number>
 }
+
+export type SourceTip = components['schemas']['SourceTip']
+export type ParameterConflict = components['schemas']['ParameterConflict']
 
 export interface DraftPlan {
   id: 'current'

@@ -19,6 +19,8 @@ from hakimi_analysis.providers.base import (
     request_with_retry,
 )
 from hakimi_analysis.providers.speech_time_units import reconcile_speech_time_units
+from hakimi_analysis.semantic_fusion import SemanticGrouping
+from hakimi_analysis.source_tips import compact_text, safe_tips
 
 StructuredResult = TypeVar("StructuredResult", bound=BaseModel)
 MAX_INLINE_VIDEO_BYTES = 45_000_000
@@ -32,6 +34,15 @@ def _validate_visual_result(result: VisualLocalizationResult, window: Segment) -
             or segment.end_seconds > window.end_seconds + 0.5
         ):
             raise ProviderSchemaError("视觉定位时间超出分析窗口")
+        segment.tips = safe_tips(
+            tip
+            for tip in segment.tips
+            if tip.evidence.type == "visual"
+            and segment.start_seconds
+            <= tip.evidence.start_seconds
+            < tip.evidence.end_seconds
+            <= segment.end_seconds
+        )
 
 
 class ArkResponsesClient:
@@ -80,7 +91,44 @@ class ArkResponsesClient:
                 or signal.end_seconds > window.end_seconds + 0.5
             ):
                 raise ProviderSchemaError("语音理解时间超出分析窗口")
+            signal.tips = safe_tips(
+                tip
+                for tip in signal.tips
+                if tip.evidence.type == "speech"
+                and signal.start_seconds
+                <= tip.evidence.start_seconds
+                < tip.evidence.end_seconds
+                <= signal.end_seconds
+                and any(
+                    isinstance(utterance, dict)
+                    and compact_text(tip.text) in compact_text(str(utterance.get("text", "")))
+                    and float(utterance.get("start_seconds", -1)) <= tip.evidence.start_seconds
+                    and tip.evidence.end_seconds <= float(utterance.get("end_seconds", -1))
+                    for utterance in transcript.get("utterances", [])
+                )
+            )
         return reconcile_speech_time_units(result, transcript)
+
+    async def group_action_evidence(
+        self,
+        *,
+        observations: list[dict[str, object]],
+        instructions: str,
+    ) -> SemanticGrouping:
+        return await self._structured_response(
+            instructions=instructions,
+            content=[
+                {
+                    "type": "input_text",
+                    "text": json.dumps(
+                        {"observations": observations},
+                        ensure_ascii=False,
+                    ),
+                }
+            ],
+            result_type=SemanticGrouping,
+            schema_name="semantic_action_grouping",
+        )
 
     async def locate_visual(
         self,
@@ -196,6 +244,13 @@ class ArkResponsesClient:
         schema_name: str,
         model_id: str | None = None,
     ) -> StructuredResult:
+        schema = result_type.model_json_schema()
+        if result_type in (VisualLocalizationResult, SpeechUnderstandingResult, SemanticGrouping):
+            # Require an explicit decision (including null), not a silently
+            # omitted name/classification default, from the Provider.
+            for definition in schema.get("$defs", {}).values():
+                if "properties" in definition:
+                    definition["required"] = list(definition["properties"])
         response = await request_with_retry(
             self._http_client,
             "POST",
@@ -213,7 +268,7 @@ class ArkResponsesClient:
                         "type": "json_schema",
                         "name": schema_name,
                         "strict": True,
-                        "schema": result_type.model_json_schema(),
+                        "schema": schema,
                     }
                 },
             },
