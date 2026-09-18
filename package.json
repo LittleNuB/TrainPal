@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "concurrently -k -n web,api -c cyan,magenta \"pnpm dev:web\" \"pnpm dev:api\"",
     "dev:web": "pnpm --filter @hachimi/web dev",
-    "dev:api": "uv run --project services/analysis-api uvicorn hakimi_analysis.main:app --reload --host 127.0.0.1 --port 8000",
+    "dev:api": "uv run --project services/analysis-api python -m hakimi_analysis.dev",
     "lint": "pnpm --filter @hachimi/web lint && uv run --project services/analysis-api ruff check services/analysis-api",
     "typecheck": "pnpm --filter @hachimi/web typecheck && uv run --project services/analysis-api mypy --config-file services/analysis-api/pyproject.toml services/analysis-api/src services/analysis-api/tests",
     "test": "pnpm test:web && pnpm test:api",
