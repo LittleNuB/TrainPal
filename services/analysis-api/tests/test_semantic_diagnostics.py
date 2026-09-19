@@ -4,11 +4,11 @@ import logging
 
 import httpx
 import pytest
+from test_semantic_contiguous_teaching import fuse, teaching
 
 from hakimi_analysis.models import CandidateParameters, SegmentRole, SpeechSignal
 from hakimi_analysis.providers.ark import ArkResponsesClient
 from hakimi_analysis.semantic_fusion import SemanticCandidateFusion
-from test_semantic_contiguous_teaching import fuse, teaching
 
 
 @pytest.mark.asyncio
@@ -324,7 +324,7 @@ async def test_reason_counts_aggregate_separate_groups_and_do_not_leak_content(
         teaching(40, 60, "private-side-a"),
         teaching(50, 70, "private-side-b"),
     ]
-    groups = [
+    groups: list[dict[str, object]] = [
         {"member_ids": ids, "name": "private-model-name", "relation": "same_demonstration"}
         for ids in [["visual-1", "visual-2"], ["visual-3", "visual-4"]]
     ]
@@ -346,7 +346,7 @@ async def test_maximum_observation_count_produces_bounded_content_free_diagnosti
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     visual = [teaching(0, 10) for _ in range(200)]
-    groups = [
+    groups: list[dict[str, object]] = [
         {"member_ids": [f"visual-{i}"], "name": "合成动作", "relation": "same_demonstration"}
         for i in range(1, 201)
     ]
