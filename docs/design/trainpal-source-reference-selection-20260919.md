@@ -18,7 +18,9 @@
 uv run --project services/analysis-api pytest services/analysis-api/tests/test_semantic_source_ranges.py services/analysis-api/tests/test_semantic_fusion.py services/analysis-api/tests/test_semantic_content_roles.py
 ```
 
-49 项通过。完整检查、E2E 与 Standards/Spec 独立审查另记于 PR。不调用收费 Provider；公开 fixture 为合成数据，不含真实媒体、转写或原始模型响应。前轮 12 次真实结果仍属于修复前版本，不能拿来证明修复后真实效果。
+49 项专项测试通过。完整 `pnpm check` 通过：275 项前端测试、864 项后端测试，以及 lint、类型检查和构建；`pnpm test:e2e` 49 项通过。`pnpm api:generate` 无合同内容变化。Standards 与 Spec 两路独立审查针对本批功能提交 af568b6 均无发现，不代表整个产品已无 P1。
+
+本批未调用收费 Provider；公开 fixture 为合成数据，不含真实媒体、转写或原始模型响应。前轮 12 次真实结果仍属于修复前版本，不能拿来证明修复后真实效果。
 
 ## 尚需用户决定的时间校验规则
 
