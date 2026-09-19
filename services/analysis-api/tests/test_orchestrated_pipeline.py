@@ -547,7 +547,7 @@ def test_skill_repository_loads_all_three_versioned_contracts() -> None:
 
     assert repository.speech_version == "1.6.0"
     assert repository.visual_version == "1.6.0"
-    assert repository.fusion_version == "2.2.0"
+    assert repository.fusion_version == "2.3.0"
     assert "continuous video clip" in repository.visual_instructions
     assert "clip-local" in repository.visual_instructions
     assert "contact sheet" not in repository.visual_instructions.casefold()

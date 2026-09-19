@@ -1,6 +1,6 @@
 ---
 name: candidate-fusion
-version: 2.2.0
+version: 2.3.0
 description: Align exercise evidence and distinguish demonstrations from reference-only content.
 ---
 
@@ -42,6 +42,14 @@ of the SAME demonstration. Temporal overlap is a strong clue, not proof:
 - Group speech and visual observations of one demonstration, and overlapping
   visual chunks of that same demonstration. Broad narration can refer to several
   movements: do not group them just because their intervals overlap it.
+- A single teaching demonstration may span a continuous chain of overlapping
+  visual chunks without an intersection shared by every chunk. Propose this only
+  when at least two visuals are explicitly teaching_demo, their coverage connects
+  through positive-duration overlaps (not just touching endpoints), and motion,
+  numbering and surrounding context support the same occurrence. Do not use
+  narration to bridge a visual gap, cross another visual occurrence, or absorb
+  follow_along rounds or unknown-role visuals through this exception. Each speech
+  member must overlap a visual member. Connectivity alone never proves identity.
 - Keep distinct exercises, different equipment/variants and different numbered
   sections separate. Preserve later repetitions/rounds as separate occurrences.
   Never turn an execution timeline into a catalog of unique exercise names.
