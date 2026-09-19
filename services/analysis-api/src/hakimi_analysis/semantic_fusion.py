@@ -206,9 +206,13 @@ class SemanticCandidateFusion:
             ):
                 retain_pending(members)
                 continue
-            reference = next(
+            reference = max(
                 (item for item in members if item.id.startswith("visual-")),
-                members[0],
+                key=lambda item: (
+                    item.candidate.segment.end_seconds - item.candidate.segment.start_seconds,
+                    -item.candidate.segment.start_seconds,
+                ),
+                default=members[0],
             )
             evidence = [span for member in members for span in member.candidate.evidence]
             roles = {item.role for item in members} - {SegmentRole.UNKNOWN}
