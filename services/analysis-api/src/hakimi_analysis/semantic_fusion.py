@@ -20,6 +20,7 @@ from hakimi_analysis.models import (
     ParameterAlternative,
     ParameterConflict,
     SegmentRole,
+    SourceTip,
     SpeechSignal,
     StrictModel,
     VisualSegment,
@@ -37,6 +38,7 @@ class SemanticGroup(StrictModel):
         "exercise", "preview", "recap", "equipment_setup", "non_training_gesture", "uncertain"
     ] = "exercise"
     related_member_id: str | None = None
+    accepted_tip_ids: list[str] = Field(default_factory=list, max_length=3)
 
 
 class SemanticGrouping(StrictModel):
@@ -67,6 +69,9 @@ class _Observation:
     sequence_label: str | None
     description: str
 
+    def tip_evidence(self) -> dict[str, SourceTip]:
+        return {f"{self.id}-tip-{index}": tip for index, tip in enumerate(self.candidate.tips, 1)}
+
     def model_input(self) -> dict[str, object]:
         return {
             "id": self.id,
@@ -77,6 +82,10 @@ class _Observation:
             "role": self.role.value,
             "sequence_label": self.sequence_label,
             "description": self.description,
+            "tip_evidence": [
+                {"id": tip_id, **tip.model_dump(mode="json")}
+                for tip_id, tip in self.tip_evidence().items()
+            ],
         }
 
 
@@ -186,7 +195,8 @@ class SemanticCandidateFusion:
 
         def retain_pending(members: list[_Observation]) -> None:
             candidates.extend(
-                item.candidate.model_copy(update={"needs_confirmation": True}) for item in members
+                item.candidate.model_copy(update={"needs_confirmation": True, "tips": []})
+                for item in members
             )
             if not warnings:
                 warnings.append(
@@ -269,9 +279,7 @@ class SemanticCandidateFusion:
                             for option in member.candidate.playback_options
                         ][:12],
                         "evidence": evidence,
-                        "tips": safe_tips(
-                            tip for member in members for tip in member.candidate.tips
-                        ),
+                        "tips": _accepted_tips(group, members),
                         "needs_confirmation": (
                             bool(conflicts)
                             or not name
@@ -318,6 +326,24 @@ class SemanticCandidateFusion:
                 dict(diagnostics),
             )
         )
+
+
+def _accepted_tips(group: SemanticGroup, members: list[_Observation]) -> list[SourceTip]:
+    available = {
+        tip_id: tip
+        for member in members
+        for tip_id, tip in member.tip_evidence().items()
+        if tip.evidence.type == member.candidate.evidence[0].type
+        and member.candidate.segment.start_seconds
+        <= tip.evidence.start_seconds
+        < tip.evidence.end_seconds
+        <= member.candidate.segment.end_seconds
+    }
+    if len(set(group.accepted_tip_ids)) != len(group.accepted_tip_ids) or any(
+        tip_id not in available for tip_id in group.accepted_tip_ids
+    ):
+        return []
+    return safe_tips(available[tip_id] for tip_id in group.accepted_tip_ids)
 
 
 def _continuous_teaching_rejections(
@@ -506,7 +532,7 @@ def _unavailable(
     return SemanticFusionResult(
         [
             item.candidate.model_copy(
-                update={"id": f"candidate-{index}", "needs_confirmation": True}
+                update={"id": f"candidate-{index}", "needs_confirmation": True, "tips": []}
             )
             for index, item in enumerate(
                 sorted(observations, key=lambda item: item.candidate.segment.start_seconds), 1
