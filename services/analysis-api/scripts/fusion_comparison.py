@@ -39,7 +39,7 @@ def _baseline_module() -> ModuleType:
         spec.loader.exec_module(module)
     finally:
         sys.modules.pop(name, None)
-    setattr(module, "_sequence_identity", _legacy_identity)
+    module.__dict__["_sequence_identity"] = _legacy_identity
     return module
 
 
