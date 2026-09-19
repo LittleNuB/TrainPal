@@ -2,14 +2,17 @@
 
 import asyncio
 import json
+import logging
 import re
 from collections import Counter
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from typing import Literal, Protocol
 
 from pydantic import Field, ValidationError
 
 from hakimi_analysis.fusion import fuse_candidates
+from hakimi_analysis.fusion_diagnostics import FusionDiagnosticCode
 from hakimi_analysis.models import (
     AnalysisCandidate,
     AnalysisWarning,
@@ -21,6 +24,7 @@ from hakimi_analysis.models import (
     StrictModel,
     VisualSegment,
 )
+from hakimi_analysis.observability import log_safe_fields
 from hakimi_analysis.providers.base import ProviderError
 from hakimi_analysis.source_tips import safe_tips
 
@@ -52,6 +56,7 @@ class SemanticGroupingModel(Protocol):
 class SemanticFusionResult:
     candidates: list[AnalysisCandidate]
     warnings: list[AnalysisWarning]
+    diagnostics: dict[FusionDiagnosticCode, int] = dataclass_field(default_factory=dict)
 
 
 @dataclass
@@ -126,46 +131,58 @@ class SemanticCandidateFusion:
         visual_segments: list[VisualSegment],
         remaining_seconds: float | None = None,
     ) -> SemanticFusionResult:
+        def finish(result: SemanticFusionResult) -> SemanticFusionResult:
+            log_safe_fields(
+                logging.getLogger(__name__),
+                source_id=source_id,
+                stage="fusing_candidates",
+                fusion_diagnostics=result.diagnostics,
+            )
+            return result
+
         observations = _observations(source_id, speech_signals, visual_segments)
         if not observations:
-            return SemanticFusionResult([], [])
+            return finish(SemanticFusionResult([], [], {"no_observations": 1}))
         model_input = [item.model_input() for item in observations]
         if (
             len(observations) > 200
             or len(json.dumps(model_input, ensure_ascii=False).encode("utf-8")) > 64_000
         ):
-            return _unavailable(observations)
+            return finish(_unavailable(observations, "unavailable_input_budget"))
         budget = (
             min(self._timeout_seconds, remaining_seconds)
             if remaining_seconds is not None
             else self._timeout_seconds
         )
         if budget <= 0:
-            return _unavailable(observations)
+            return finish(_unavailable(observations, "unavailable_time_budget"))
         try:
             async with asyncio.timeout(budget):
                 grouping = await self._model.group_action_evidence(
                     observations=model_input,
                     instructions=self._instructions,
                 )
-        except (TimeoutError, ProviderError):
-            return _unavailable(observations)
+        except TimeoutError:
+            return finish(_unavailable(observations, "unavailable_timeout"))
+        except ProviderError:
+            return finish(_unavailable(observations, "unavailable_provider"))
         by_id = {item.id: item for item in observations}
         if Counter(item_id for group in grouping.groups for item_id in group.member_ids) != Counter(
             by_id.keys()
         ):
-            return _unavailable(observations)
+            return finish(_unavailable(observations, "unavailable_membership"))
         owners = {item_id: group for group in grouping.groups for item_id in group.member_ids}
         for group in grouping.groups:
             if group.content_role in {"preview", "recap"}:
                 target_group = owners.get(group.related_member_id or "")
                 if target_group is None or target_group.content_role != "exercise":
-                    return _unavailable(observations)
+                    return finish(_unavailable(observations, "unavailable_reference_target"))
             elif group.related_member_id is not None:
-                return _unavailable(observations)
+                return finish(_unavailable(observations, "unavailable_reference_target"))
         candidates: list[AnalysisCandidate] = []
         warnings: list[AnalysisWarning] = []
         resolved: dict[str, AnalysisCandidate] = {}
+        diagnostics: Counter[FusionDiagnosticCode] = Counter()
 
         def retain_pending(members: list[_Observation]) -> None:
             candidates.extend(
@@ -188,6 +205,7 @@ class SemanticCandidateFusion:
                 and group.relation == "same_demonstration"
                 and _can_reclassify(members)
             ):
+                diagnostics["non_training_excluded"] += 1
                 continue
             parameters, conflicts = _resolve_parameters(members)
             simultaneous = max(item.candidate.segment.start_seconds for item in members) < min(
@@ -198,14 +216,28 @@ class SemanticCandidateFusion:
                 for item in members
                 if item.sequence_label is not None
             }
-            if (
-                group.relation == "uncertain"
-                or group.content_role != "exercise"
-                or not (simultaneous or _continuous_teaching(members, observations))
-                or len(labels) > 1
-            ):
+            reasons: set[FusionDiagnosticCode] = set()
+            if group.relation == "uncertain":
+                reasons.add("model_uncertain")
+            if group.content_role != "exercise":
+                reasons.add("content_role_rejected")
+            if not simultaneous:
+                time_reasons = _continuous_teaching_rejections(members, observations)
+                if time_reasons:
+                    reasons.update(time_reasons)
+                    reasons.add("time_alignment_rejected")
+            if len(labels) > 1:
+                reasons.add("sequence_label_conflict")
+            if reasons:
+                diagnostics["group_rejected"] += 1
+                diagnostics.update(reasons)
                 retain_pending(members)
                 continue
+            diagnostics[
+                "common_intersection_accepted" if simultaneous else "continuous_teaching_accepted"
+            ] += 1
+            if conflicts:
+                diagnostics["parameter_conflict_groups"] += 1
             reference = max(
                 (item for item in members if item.id.startswith("visual-")),
                 key=lambda item: (
@@ -265,35 +297,51 @@ class SemanticCandidateFusion:
             target_id = group.related_member_id or ""
             target = resolved.get(target_id)
             primary = [by_id[item_id] for item_id in owners[target_id].member_ids]
-            if target is not None and _can_reference(group, members, primary):
+            reference_reasons = _reference_rejections(group, members, primary)
+            if target is None:
+                reference_reasons.add("reference_target_unresolved")
+            if target is not None and not reference_reasons:
                 target.evidence.extend(span for item in members for span in item.candidate.evidence)
+                diagnostics["reference_attached"] += 1
             else:
+                diagnostics["reference_rejected"] += 1
+                diagnostics.update(reference_reasons)
                 retain_pending(members)
         candidates.sort(key=lambda item: item.segment.start_seconds)
-        return SemanticFusionResult(
-            [
-                item.model_copy(update={"id": f"candidate-{index}"})
-                for index, item in enumerate(candidates, 1)
-            ],
-            warnings,
+        return finish(
+            SemanticFusionResult(
+                [
+                    item.model_copy(update={"id": f"candidate-{index}"})
+                    for index, item in enumerate(candidates, 1)
+                ],
+                warnings,
+                dict(diagnostics),
+            )
         )
 
 
-def _continuous_teaching(members: list[_Observation], observations: list[_Observation]) -> bool:
+def _continuous_teaching_rejections(
+    members: list[_Observation], observations: list[_Observation]
+) -> set[FusionDiagnosticCode]:
     # ADR-0055: only explicit teaching visuals can bridge a missing common intersection.
     visual = sorted(
         (item for item in members if item.id.startswith("visual-")),
         key=lambda item: item.candidate.segment.start_seconds,
     )
-    if len(visual) < 2 or any(item.role != SegmentRole.TEACHING_DEMO for item in visual):
-        return False
+    reasons: set[FusionDiagnosticCode] = set()
+    if len(visual) < 2:
+        reasons.add("visual_count_insufficient")
+    if any(item.role != SegmentRole.TEACHING_DEMO for item in visual):
+        reasons.add("visual_role_not_teaching")
     if any(item.role == SegmentRole.FOLLOW_ALONG for item in members):
-        return False
+        reasons.add("follow_along_present")
+    if not visual:
+        return reasons
     covered_end = visual[0].candidate.segment.end_seconds
     for item in visual[1:]:
         segment = item.candidate.segment
         if segment.start_seconds >= covered_end:
-            return False
+            reasons.add("visual_chain_disconnected")
         covered_end = max(covered_end, segment.end_seconds)
     member_ids = {item.id for item in members}
     start = visual[0].candidate.segment.start_seconds
@@ -305,8 +353,8 @@ def _continuous_teaching(members: list[_Observation], observations: list[_Observ
         and start < item.candidate.segment.end_seconds
         for item in observations
     ):
-        return False
-    return all(
+        reasons.add("external_visual_boundary")
+    if not all(
         any(
             item.candidate.segment.start_seconds < segment.candidate.segment.end_seconds
             and segment.candidate.segment.start_seconds < item.candidate.segment.end_seconds
@@ -314,28 +362,39 @@ def _continuous_teaching(members: list[_Observation], observations: list[_Observ
         )
         for item in members
         if item.id.startswith("speech-")
-    )
+    ):
+        reasons.add("speech_outside_visual")
+    return reasons
 
 
-def _can_reference(
+def _reference_rejections(
     group: SemanticGroup, members: list[_Observation], primary: list[_Observation]
-) -> bool:
-    if group.relation != "same_demonstration" or not _can_reclassify(members):
-        return False
+) -> set[FusionDiagnosticCode]:
+    reasons: set[FusionDiagnosticCode] = set()
+    if group.relation != "same_demonstration":
+        reasons.add("reference_uncertain")
+    if not _can_reclassify(members):
+        reasons.add("reference_role_protected")
     labels = {
         _sequence_identity(item.sequence_label)
         for item in [*members, *primary]
         if item.sequence_label is not None
     }
-    if len(labels) > 1 or _compatible_parameters([*primary, *members]) is None:
-        return False
+    if len(labels) > 1:
+        reasons.add("reference_label_conflict")
+    if _compatible_parameters([*primary, *members]) is None:
+        reasons.add("reference_parameter_conflict")
     if group.content_role == "preview":
-        return max(item.candidate.segment.end_seconds for item in members) <= min(
+        direction_valid = max(item.candidate.segment.end_seconds for item in members) <= min(
             item.candidate.segment.start_seconds for item in primary
         )
-    return min(item.candidate.segment.start_seconds for item in members) >= max(
-        item.candidate.segment.end_seconds for item in primary
-    )
+    else:
+        direction_valid = min(item.candidate.segment.start_seconds for item in members) >= max(
+            item.candidate.segment.end_seconds for item in primary
+        )
+    if not direction_valid:
+        reasons.add("reference_direction_conflict")
+    return reasons
 
 
 def _can_reclassify(members: list[_Observation]) -> bool:
@@ -438,7 +497,9 @@ def _chinese_name(name: str | None) -> str | None:
     return None
 
 
-def _unavailable(observations: list[_Observation]) -> SemanticFusionResult:
+def _unavailable(
+    observations: list[_Observation], reason: FusionDiagnosticCode
+) -> SemanticFusionResult:
     return SemanticFusionResult(
         [
             item.candidate.model_copy(
@@ -454,4 +515,5 @@ def _unavailable(observations: list[_Observation]) -> SemanticFusionResult:
                 message="语义去重未完成，已保留原始候选，请核对重复动作",
             )
         ],
+        {reason: 1},
     )
