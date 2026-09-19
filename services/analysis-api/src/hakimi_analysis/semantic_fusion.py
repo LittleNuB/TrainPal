@@ -483,10 +483,13 @@ def _compatible_parameters(members: list[_Observation]) -> CandidateParameters |
 
 def _sequence_identity(label: str) -> tuple[str, str]:
     # Normalize only complete, unambiguous ordinal labels; retain side/round modifiers.
-    match = re.fullmatch(r"(?:动作|#)?\s*([0-9]+|[零一二三四五六七八九十])", label.strip())
+    numeral = r"([0-9]+|[零一二三四五六七八九十])"
+    match = re.fullmatch(
+        rf"(?:动作|#)?\s*{numeral}|第\s*{numeral}\s*(?:个)?\s*动作", label.strip()
+    )
     if match is None:
         return ("literal", label)
-    number = match.group(1)
+    number = match.group(1) or match.group(2)
     value = int(number) if number.isascii() else "零一二三四五六七八九十".index(number)
     return ("number", str(value))
 
