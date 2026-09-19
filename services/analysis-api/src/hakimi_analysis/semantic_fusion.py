@@ -201,7 +201,7 @@ class SemanticCandidateFusion:
             if (
                 group.relation == "uncertain"
                 or group.content_role != "exercise"
-                or not simultaneous
+                or not (simultaneous or _continuous_teaching(members, observations))
                 or len(labels) > 1
             ):
                 retain_pending(members)
@@ -277,6 +277,44 @@ class SemanticCandidateFusion:
             ],
             warnings,
         )
+
+
+def _continuous_teaching(members: list[_Observation], observations: list[_Observation]) -> bool:
+    # ADR-0055: only explicit teaching visuals can bridge a missing common intersection.
+    visual = sorted(
+        (item for item in members if item.id.startswith("visual-")),
+        key=lambda item: item.candidate.segment.start_seconds,
+    )
+    if len(visual) < 2 or any(item.role != SegmentRole.TEACHING_DEMO for item in visual):
+        return False
+    if any(item.role == SegmentRole.FOLLOW_ALONG for item in members):
+        return False
+    covered_end = visual[0].candidate.segment.end_seconds
+    for item in visual[1:]:
+        segment = item.candidate.segment
+        if segment.start_seconds >= covered_end:
+            return False
+        covered_end = max(covered_end, segment.end_seconds)
+    member_ids = {item.id for item in members}
+    start = visual[0].candidate.segment.start_seconds
+    # A separate visual observation is a boundary even if its identity is uncertain.
+    if any(
+        item.id.startswith("visual-")
+        and item.id not in member_ids
+        and item.candidate.segment.start_seconds < covered_end
+        and start < item.candidate.segment.end_seconds
+        for item in observations
+    ):
+        return False
+    return all(
+        any(
+            item.candidate.segment.start_seconds < segment.candidate.segment.end_seconds
+            and segment.candidate.segment.start_seconds < item.candidate.segment.end_seconds
+            for segment in visual
+        )
+        for item in members
+        if item.id.startswith("speech-")
+    )
 
 
 def _can_reference(
