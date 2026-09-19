@@ -98,6 +98,9 @@
   success, partial completion, cancellation, and failure.
 - Logs may contain run/source IDs, stages, timing, version identifiers, provider
   request IDs, and redacted error codes only.
+- The approved fusion diagnostic adds only fixed reason-code counts (integers
+  0–200); arbitrary keys, content, raw grouping, labels and evidence remain forbidden.
+  See `docs/design/trainpal-fusion-diagnostics-spec-20260919.md`.
 
 ## Verification
 
