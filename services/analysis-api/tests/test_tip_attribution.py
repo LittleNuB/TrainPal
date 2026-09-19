@@ -314,3 +314,31 @@ async def test_input_budget_failure_retains_candidates_without_unreviewed_tips()
     assert len(result.candidates) == 201
     assert not requests
     assert all(not candidate.tips for candidate in result.candidates)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "selection",
+    [
+        ["visual-1-tip-1", "visual-1-tip-2", "visual-2-tip-1", "visual-2-tip-2"],
+        None,
+        "visual-1-tip-2",
+        [123],
+    ],
+)
+async def test_malformed_tip_selection_does_not_undo_valid_action_fusion(selection: Any) -> None:
+    result, _ = await fuse(
+        [next_action(), next_action()],
+        [
+            {
+                "member_ids": ["visual-1", "visual-2"],
+                "name": "反向飞鸟",
+                "relation": "same_demonstration",
+                "accepted_tip_ids": selection,
+            }
+        ],
+    )
+    assert len(result.candidates) == 1
+    assert result.candidates[0].tips == []
+    assert len(result.candidates[0].evidence) == 2
+    assert result.warnings == []

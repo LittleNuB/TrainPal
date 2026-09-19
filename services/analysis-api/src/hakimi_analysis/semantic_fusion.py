@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from typing import Literal, Protocol
 
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, field_validator
 
 from hakimi_analysis.fusion import fuse_candidates
 from hakimi_analysis.fusion_diagnostics import FusionDiagnosticCode
@@ -39,6 +39,18 @@ class SemanticGroup(StrictModel):
     ] = "exercise"
     related_member_id: str | None = None
     accepted_tip_ids: list[str] = Field(default_factory=list, max_length=3)
+
+    @field_validator("accepted_tip_ids", mode="before")
+    @classmethod
+    def isolate_invalid_tip_selection(cls, value: object) -> object:
+        # Bad optional reminders must not invalidate otherwise valid action grouping.
+        if (
+            not isinstance(value, list)
+            or len(value) > 3
+            or any(not isinstance(item, str) for item in value)
+        ):
+            return []
+        return value
 
 
 class SemanticGrouping(StrictModel):
