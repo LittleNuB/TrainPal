@@ -18,6 +18,7 @@ from hakimi_analysis.providers.ark import ArkResponsesClient
 from hakimi_analysis.semantic_fusion import (
     SemanticCandidateFusion,
     SemanticFusionResult,
+    SemanticGroup,
     SemanticGrouping,
 )
 
@@ -55,6 +56,54 @@ def _canonical(value: object) -> str:
 
 def _fingerprint(value: object) -> str:
     return hashlib.sha256(_canonical(value).encode()).hexdigest()
+
+
+def _valid_raw_format(payload: Any) -> bool:
+    """Audit before production's tolerant defaults/choice clearing; retain no text."""
+    try:
+        text = payload.get("output_text")
+        if not isinstance(text, str):
+            # The two documented Ark response envelopes, using the same first-text
+            # precedence as the production adapter (not a replacement parser).
+            text = next(
+                c["text"] for o in payload.get("output", []) if isinstance(o, dict)
+                for c in o.get("content", []) if isinstance(c, dict)
+                and c.get("type") == "output_text" and isinstance(c.get("text"), str)
+            )
+        raw = json.loads(text)
+        for group in raw["groups"]:
+            if set(group) != set(SemanticGroup.model_fields):
+                return False
+            selected = group["accepted_tip_ids"]
+            if not isinstance(selected, list) or len(selected) > 3 or any(
+                not isinstance(value, str) for value in selected
+            ):
+                return False
+        SemanticGrouping.model_validate_json(text, strict=True)
+        return True
+    except (ValueError, TypeError, KeyError, AttributeError, StopIteration):
+        return False
+
+
+class _AuditTransport(httpx.AsyncBaseTransport):
+    """Forward through the explicitly supplied client without changing its hooks."""
+
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        self.client = client
+        self.output_format_valid: bool | None = None
+        self.requests = 0
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.requests += 1
+        if self.requests != 1:
+            raise RuntimeError("trial_repeated_http_request")
+        response = await self.client.send(request, follow_redirects=False)
+        if response.is_success:
+            try:
+                self.output_format_valid = _valid_raw_format(response.json())
+            except ValueError:
+                self.output_format_valid = False
+        return response
 
 
 def _groups(grouping: SemanticGrouping) -> list[tuple[object, ...]]:
@@ -161,9 +210,11 @@ class TipAttributionTrial:
         self._arm = arm
         self._instructions = instructions
         self._used = False
+        self._transport = _AuditTransport(http_client)
+        self._client = httpx.AsyncClient(transport=self._transport, timeout=20)
         self._model = _TrialModel(ArkResponsesClient(
             api_key=api_key, model_id=model_id, base_url=base_url,
-            http_client=http_client, retry_delays=(),
+            http_client=self._client, retry_delays=(),
         ), arm, self._case)
 
     async def run(self) -> dict[str, Any]:
@@ -172,12 +223,13 @@ class TipAttributionTrial:
         self._used = True
         started = time.monotonic()
         try:
-            result = await SemanticCandidateFusion(
-                model=self._model, instructions=self._instructions, timeout_seconds=20,
-            ).run(
-                source_id="synthetic-tip-contrast", speech_signals=[],
-                visual_segments=[VisualSegment.model_validate(v) for v in self._case["visual"]],
-            )
+            async with self._client:
+                result = await SemanticCandidateFusion(
+                    model=self._model, instructions=self._instructions, timeout_seconds=20,
+                ).run(
+                    source_id="synthetic-tip-contrast", speech_signals=[],
+                    visual_segments=[VisualSegment.model_validate(v) for v in self._case["visual"]],
+                )
             checks = _score(self._case, self._model.grouping, result)
             unavailable = any(k.startswith("unavailable_") for k in result.diagnostics)
             fixed_drift = False
@@ -187,16 +239,20 @@ class TipAttributionTrial:
                 fixed_drift = sorted(map(_canonical, actual)) != sorted(
                     map(_canonical, self._model.fixed_groups)
                 )
-            if fixed_drift or unavailable:
+            invalid_format = self._transport.output_format_valid is False
+            if fixed_drift or unavailable or invalid_format:
                 checks["passed"] = False
             return {
                 "case": self._case["id"], "arm": self._arm,
                 "status": "unavailable" if unavailable else
+                "invalid_output_format" if invalid_format else
                 "fixed_group_drift" if fixed_drift else
                 "passed" if checks["passed"] else "quality_failed",
                 **checks,
                 "diagnostics": dict(result.diagnostics),
                 "logical_requests": self._model.calls,
+                "http_requests": self._transport.requests,
+                "output_format_valid": self._transport.output_format_valid,
                 "request_sha256": self._model.request_hash,
                 "case_sha256": _fingerprint(self._case),
                 "seconds": round(time.monotonic() - started, 3),

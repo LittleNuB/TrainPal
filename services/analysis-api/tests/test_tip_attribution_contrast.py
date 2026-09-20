@@ -178,3 +178,58 @@ async def test_failures_do_not_retry_persist_content_or_allow_reuse(failure: str
         with pytest.raises(RuntimeError, match="trial_already_used"):
             await trial.run()
     assert calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", [None, "bad", ["bad"] * 4, [False], "missing"])
+@pytest.mark.parametrize("arm", ["nested", "flat", "flat_fixed_groups"])
+async def test_production_clearing_invalid_choices_cannot_fake_model_success(
+    invalid: object, arm: str,
+) -> None:
+    groups = load_tool().load_case("ambiguous_transition")["groups"]
+    if invalid == "missing":
+        groups[0].pop("accepted_tip_ids")
+    else:
+        groups[0]["accepted_tip_ids"] = invalid
+    receipt, _ = await run_cell(arm, "ambiguous_transition", response_groups=groups)
+    assert receipt["status"] == "invalid_output_format"
+    assert receipt["passed"] is False
+    # Current production output is intentionally unchanged; the audit must catch
+    # the earlier invalid field instead of counting this sanitized result as success.
+    assert receipt["unexpected_tips"] == receipt["missing_required_tips"] == 0
+    assert receipt["output_format_valid"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["content_role", "related_member_id"])
+async def test_production_defaults_cannot_hide_omitted_required_response_fields(field: str) -> None:
+    groups = load_tool().load_case("ambiguous_transition")["groups"]
+    groups[0].pop(field)
+    receipt, _ = await run_cell("flat", "ambiguous_transition", response_groups=groups)
+    assert receipt["status"] == "invalid_output_format"
+    assert receipt["passed"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", [False, True])
+async def test_nested_ark_envelope_is_audited_without_closing_the_callers_client(
+    invalid: bool,
+) -> None:
+    groups = load_tool().load_case("ambiguous_transition")["groups"]
+    if invalid:
+        groups[0]["accepted_tip_ids"] = None
+    payload = {"output": [{"type": "message", "content": [
+        {"type": "output_text", "text": json.dumps({"groups": groups})},
+    ]}]}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda _: httpx.Response(200, json=payload),
+    )) as client:
+        receipt = await load_tool().TipAttributionTrial(
+            case_id="ambiguous_transition", arm="flat", http_client=client,
+            api_key="synthetic", model_id="synthetic", base_url="https://ark.test",
+            instructions=SkillRepository.load(ROOT / "skills").fusion_instructions,
+        ).run()
+        assert not client.is_closed
+    assert receipt["status"] == ("invalid_output_format" if invalid else "passed")
+    assert receipt["output_format_valid"] is not invalid
+    assert receipt["http_requests"] == 1
