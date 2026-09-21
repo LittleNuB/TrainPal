@@ -3,6 +3,8 @@
 日期：2026-09-21。规格：[最小对照](trainpal-tip-attribution-contrast-spec-20260921.md)。
 本轮没有真实 Provider 调用；下面不是模型质量结果。
 
+后续状态：另获新授权后，已完成 6 次真实文本对照，详见[真实结果](trainpal-tip-attribution-contrast-results-20260921.md)。下文未授权/未执行描述仅指准备阶段。
+
 ## 已准备
 
 - 实验工具：`services/analysis-api/scripts/tip_attribution_contrast.py`，不由应用导入，不搜索凭据、不读取本地环境配置、不提供自动联网命令。
