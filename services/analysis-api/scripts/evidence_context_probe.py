@@ -8,7 +8,6 @@ All times must already share the analysis timeline; no offsets are added here.
 import hashlib
 import json
 import math
-from itertools import pairwise
 from typing import Any, cast
 
 from pydantic import Field
@@ -106,9 +105,12 @@ def _context(batch: EvidenceBatch) -> dict[str, Any]:
     if not records:
         gaps.append("source_context_missing")
     selected_utterances = [utterances[i] for i in sorted(selected)]
-    if any(a.end_seconds < b.start_seconds
-           for a, b in pairwise(selected_utterances)):
-        gaps.append("transcript_time_gap")
+    covered_until: float | None = None
+    for utterance in selected_utterances:
+        if covered_until is not None and utterance.start_seconds > covered_until:
+            gaps.append("transcript_time_gap")
+            break
+        covered_until = max(covered_until or 0, utterance.end_seconds)
     return {
         "binding": batch.binding.model_dump(), "input_sha256": fingerprint,
         "records": records, "links": links,

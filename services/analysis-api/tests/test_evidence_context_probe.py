@@ -295,3 +295,15 @@ async def test_tip_references_follow_filtered_public_observations_not_raw_list_p
     assert set(links) == {"speech-1-tip-1"}
     assert links["speech-1-tip-1"]["content_match"] == "exact_substring_only"
     assert links["speech-1-tip-1"]["content_refs"]
+
+
+@pytest.mark.asyncio
+async def test_overlapping_utterances_do_not_create_a_false_time_gap() -> None:
+    _, _, wire = await inspect_batch(change={"transcript": {"text": "", "utterances": [
+        {"text": SENTENCE, "start_seconds": 1, "end_seconds": 20},
+        {"text": "重叠语句甲", "start_seconds": 5, "end_seconds": 6},
+        {"text": "重叠语句乙", "start_seconds": 10, "end_seconds": 11},
+    ]}})
+    context = envelope(wire)["evidence_context"]
+    assert "transcript_time_gap" not in context["gaps"]
+    assert context["continuity"] == "unverified"
