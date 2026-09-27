@@ -1,0 +1,68 @@
+{
+  "kind": "constructed_development_cases_not_blind_test",
+  "cases": [
+    {
+      "id": "ambiguous_transition",
+      "visual": [
+        {
+          "action_name": "杠铃提拉", "start_seconds": 0, "end_seconds": 15,
+          "visual_cue": "第一项提拉教学结尾，12–15秒有转场，无法精确判断切换时刻",
+          "sequence_label": "1", "segment_role": "teaching_demo", "tips": []
+        },
+        {
+          "action_name": "反向飞鸟", "start_seconds": 12, "end_seconds": 30,
+          "visual_cue": "第二项反向飞鸟，转场时泛化字幕仍在但无法确定针对哪一动作；22–24秒为反向飞鸟准备姿势的独立清晰字幕",
+          "sequence_label": "2", "segment_role": "teaching_demo",
+          "tips": [
+            {"text": "坚持完成4组", "category": "rhythm", "evidence": {"type": "visual", "start_seconds": 12, "end_seconds": 14}},
+            {"text": "胸部贴住靠垫", "category": "setup", "evidence": {"type": "visual", "start_seconds": 22, "end_seconds": 24}}
+          ]
+        }
+      ],
+      "groups": [
+        {"member_ids": ["visual-1"], "name": "杠铃提拉", "relation": "same_demonstration", "content_role": "exercise", "related_member_id": null, "accepted_tip_ids": []},
+        {"member_ids": ["visual-2"], "name": "反向飞鸟", "relation": "same_demonstration", "content_role": "exercise", "related_member_id": null, "accepted_tip_ids": ["visual-2-tip-2"]}
+      ],
+      "expected_outputs": [
+        {"segment": [0, 15], "parameters": {}, "tips": []},
+        {"segment": [12, 30], "parameters": {}, "tips": [
+          {"text": "胸部贴住靠垫", "category": "setup", "evidence": {"type": "visual", "start_seconds": 22, "end_seconds": 24}}
+        ]}
+      ]
+    },
+    {
+      "id": "previous_action_closing_caption",
+      "visual": [
+        {
+          "action_name": "杠铃提拉", "start_seconds": 120, "end_seconds": 152,
+          "visual_cue": "第三项杠铃提拉教学，150秒仍手持杠铃做提拉，字幕为坚持完成4组，随后切镜头",
+          "sequence_label": "3", "segment_role": "teaching_demo",
+          "tips": [
+            {"text": "肘部向两侧打开", "category": "path", "evidence": {"type": "visual", "start_seconds": 140, "end_seconds": 142}}
+          ]
+        },
+        {
+          "action_name": "反向飞鸟", "start_seconds": 150, "end_seconds": 200,
+          "visual_cue": "片段开头仍有杠铃提拉收尾画面，152秒后介绍第四项反向飞鸟，170秒为蝴蝶机双手向两侧打开教学",
+          "sequence_label": "4", "segment_role": "teaching_demo",
+          "tips": [
+            {"text": "坚持完成4组", "category": "rhythm", "evidence": {"type": "visual", "start_seconds": 150, "end_seconds": 152}},
+            {"text": "双手朝两侧打开", "category": "path", "evidence": {"type": "visual", "start_seconds": 170, "end_seconds": 172}}
+          ]
+        }
+      ],
+      "groups": [
+        {"member_ids": ["visual-1"], "name": "杠铃提拉", "relation": "same_demonstration", "content_role": "exercise", "related_member_id": null, "accepted_tip_ids": ["visual-1-tip-1"]},
+        {"member_ids": ["visual-2"], "name": "反向飞鸟", "relation": "same_demonstration", "content_role": "exercise", "related_member_id": null, "accepted_tip_ids": ["visual-2-tip-2"]}
+      ],
+      "expected_outputs": [
+        {"segment": [120, 152], "parameters": {}, "tips": [
+          {"text": "肘部向两侧打开", "category": "path", "evidence": {"type": "visual", "start_seconds": 140, "end_seconds": 142}}
+        ]},
+        {"segment": [150, 200], "parameters": {}, "tips": [
+          {"text": "双手朝两侧打开", "category": "path", "evidence": {"type": "visual", "start_seconds": 170, "end_seconds": 172}}
+        ]}
+      ]
+    }
+  ]
+}

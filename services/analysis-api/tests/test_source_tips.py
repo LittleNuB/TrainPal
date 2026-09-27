@@ -39,7 +39,12 @@ async def test_only_exact_timed_speech_tips_reach_the_candidate() -> None:
         if schema == "semantic_action_grouping":
             result = {
                 "groups": [
-                    {"member_ids": ["speech-1"], "name": "俯卧撑", "relation": "same_demonstration"}
+                    {
+                        "member_ids": ["speech-1"],
+                        "name": "俯卧撑",
+                        "relation": "same_demonstration",
+                        "accepted_tip_ids": ["speech-1-tip-1"],
+                    }
                 ]
             }
         return httpx.Response(200, json={"output_text": json.dumps(result)})
