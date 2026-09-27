@@ -58,7 +58,7 @@ def _fingerprint(value: object) -> str:
     return hashlib.sha256(_canonical(value).encode()).hexdigest()
 
 
-def _valid_raw_format(payload: Any) -> bool:
+def valid_raw_grouping_format(payload: Any) -> bool:
     """Audit before production's tolerant defaults/choice clearing; retain no text."""
     try:
         text = payload.get("output_text")
@@ -85,7 +85,7 @@ def _valid_raw_format(payload: Any) -> bool:
         return False
 
 
-class _AuditTransport(httpx.AsyncBaseTransport):
+class TrialAuditTransport(httpx.AsyncBaseTransport):
     """Forward through the explicitly supplied client without changing its hooks."""
 
     def __init__(self, client: httpx.AsyncClient) -> None:
@@ -100,7 +100,7 @@ class _AuditTransport(httpx.AsyncBaseTransport):
         response = await self.client.send(request, follow_redirects=False)
         if response.is_success:
             try:
-                self.output_format_valid = _valid_raw_format(response.json())
+                self.output_format_valid = valid_raw_grouping_format(response.json())
             except ValueError:
                 self.output_format_valid = False
         return response
@@ -120,7 +120,7 @@ def _selections(grouping: SemanticGrouping) -> Counter[tuple[tuple[str, ...], st
     )
 
 
-def _score(
+def score_trial(
     case: dict[str, Any], grouping: SemanticGrouping | None, result: SemanticFusionResult,
 ) -> dict[str, Any]:
     expected = SemanticGrouping.model_validate({"groups": case["groups"]})
@@ -210,7 +210,7 @@ class TipAttributionTrial:
         self._arm = arm
         self._instructions = instructions
         self._used = False
-        self._transport = _AuditTransport(http_client)
+        self._transport = TrialAuditTransport(http_client)
         self._client = httpx.AsyncClient(transport=self._transport, timeout=20)
         self._model = _TrialModel(ArkResponsesClient(
             api_key=api_key, model_id=model_id, base_url=base_url,
@@ -230,7 +230,7 @@ class TipAttributionTrial:
                     source_id="synthetic-tip-contrast", speech_signals=[],
                     visual_segments=[VisualSegment.model_validate(v) for v in self._case["visual"]],
                 )
-            checks = _score(self._case, self._model.grouping, result)
+            checks = score_trial(self._case, self._model.grouping, result)
             unavailable = any(k.startswith("unavailable_") for k in result.diagnostics)
             fixed_drift = False
             if self._arm == "flat_fixed_groups" and self._model.grouping is not None:
