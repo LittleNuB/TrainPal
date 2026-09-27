@@ -9,7 +9,7 @@ import hashlib
 import json
 import math
 from itertools import pairwise
-from typing import Any
+from typing import Any, cast
 
 from pydantic import Field
 
@@ -84,19 +84,10 @@ def _context(batch: EvidenceBatch) -> dict[str, Any]:
                         if signal.evidence_text.strip() and signal.evidence_text in r["text"]
                         and r["start_seconds"] < signal.end_seconds
                         and signal.start_seconds < r["end_seconds"]]
-        tips = {}
-        for tip_index, tip in enumerate(signal.tips, 1):
-            refs = [r["id"] for r in records if tip.text in r["text"]
-                    and r["start_seconds"] <= tip.evidence.start_seconds
-                    and tip.evidence.end_seconds <= r["end_seconds"]]
-            tips[f"speech-{index}-tip-{tip_index}"] = {
-                "content_refs": refs,
-                "content_match": "exact_substring_only" if refs else "unmatched",
-            }
         links[f"speech-{index}"] = {
             "support_refs": support_refs,
             "support_match": "exact_substring_only" if support_refs else "unmatched",
-            "tips": tips, "attribution": "not_reviewed",
+            "attribution": "not_reviewed",
         }
     for index, segment in enumerate(batch.visual, 1):
         record_id = f"{fingerprint}:visual-{index}"
@@ -137,6 +128,24 @@ class _ContextModel:
     async def group_action_evidence(
         self, *, observations: list[dict[str, object]], instructions: str,
     ) -> SemanticGrouping:
+        # Fusion filters/deduplicates tips before assigning IDs. Link the actual
+        # public observations, never positions in the upstream unfiltered list.
+        for observation in observations:
+            if observation["source_type"] != "speech":
+                continue
+            tips = {}
+            for tip in cast(list[dict[str, Any]], observation["tip_evidence"]):
+                refs = [r["id"] for r in self.context["records"]
+                        if r["producer"] == "asr_transcript_unverified"
+                        and tip["evidence"]["type"] == "speech"
+                        and tip["text"] in r["text"]
+                        and r["start_seconds"] <= tip["evidence"]["start_seconds"]
+                        and tip["evidence"]["end_seconds"] <= r["end_seconds"]]
+                tips[tip["id"]] = {
+                    "content_refs": refs,
+                    "content_match": "exact_substring_only" if refs else "unmatched",
+                }
+            self.context["links"][observation["id"]]["tips"] = tips
         observations = [
             {**o, "description": self.descriptions.get(str(o["id"]), o["description"])}
             for o in observations

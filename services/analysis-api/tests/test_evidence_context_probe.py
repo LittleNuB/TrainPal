@@ -278,3 +278,20 @@ async def test_technical_failure_is_not_reported_as_quality_success(failure: str
 async def test_cancel_is_not_hidden_by_probe() -> None:
     with pytest.raises(asyncio.CancelledError):
         await run_probe(failure="cancel")
+
+
+@pytest.mark.asyncio
+async def test_tip_references_follow_filtered_public_observations_not_raw_list_positions() -> None:
+    _, _, wire = await inspect_batch(change={"speech": [{
+        "action_name": "反向飞鸟", "evidence_text": "反向飞鸟",
+        "start_seconds": 10, "end_seconds": 15,
+        "tips": [{"text": text, "category": "setup", "evidence": {
+            "type": "speech", "start_seconds": 11, "end_seconds": 14,
+        }} for text in ["保证必瘦", "胸部贴住靠垫", "胸部贴住靠垫"]],
+    }]})
+    data = envelope(wire)
+    assert [t["text"] for t in data["observations"][0]["tip_evidence"]] == ["胸部贴住靠垫"]
+    links = data["evidence_context"]["links"]["speech-1"]["tips"]
+    assert set(links) == {"speech-1-tip-1"}
+    assert links["speech-1-tip-1"]["content_match"] == "exact_substring_only"
+    assert links["speech-1-tip-1"]["content_refs"]
