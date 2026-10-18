@@ -131,6 +131,62 @@ describe('personalization review boundaries', () => {
     wrapper.unmount()
   })
 
+  it.each(['reduce_to_finish', 'extend_recovery'] as const)(
+    'hides saved model summary and %s explanation after referenced feedback is cleared', async reason => {
+      const { wrapper, draft, library, open, generate, pinia, router } = await setup()
+      const item = draft.items[0]!
+      library.actionFeedback = [{ id: 'record:action', recordId: 'record', planId: 'saved-plan',
+        itemId: item.id, actionVersion: actionFeedbackVersion(item), value: 'too_hard', recordedAt: '2026-10-09T00:00:00Z' }]
+      await open()
+      await wrapper.get('[data-adjustment-intent="easier_to_finish"]').trigger('click')
+      await generate()
+      const proposal = draft.adjustmentProposal!
+      proposal.summary = '根据上次太累的反馈调整了这次方案'
+      for (const change of proposal.changes) {
+        change.reasonCode = reason
+        change.explanation = '上次太累，适当降低训练压力'
+      }
+      await flushPromises()
+      expect(wrapper.get('.adjustment-dialog').text()).toContain(proposal.summary)
+      expect(wrapper.get('.adjustment-change-list').text()).toContain('上次太累，适当降低训练压力')
+      const original = JSON.stringify(proposal)
+      library.actionFeedback = []
+      await flushPromises()
+      expect(wrapper.get('.adjustment-dialog').text()).not.toContain('上次太累')
+      expect(wrapper.get('.adjustment-dialog').text()).toContain('原反馈已更新或清除')
+      wrapper.unmount()
+      vi.mocked(requestPlanAdjustment).mockClear()
+      const returned = mount(PlanDraftView, { attachTo: document.body, global: { plugins: [pinia, router] } })
+      await returned.get('[data-adjustment-trigger]').trigger('click')
+      expect(returned.get('.adjustment-dialog').text()).not.toContain('上次太累')
+      expect(JSON.stringify(draft.adjustmentProposal)).toBe(original)
+      expect(requestPlanAdjustment).not.toHaveBeenCalled()
+      returned.unmount()
+    },
+  )
+
+  it('hides a saved no-change model summary when its feedback value is updated', async () => {
+    const { wrapper, draft, library, open, generate, pinia, router } = await setup()
+    const item = draft.items[0]!
+    library.actionFeedback = [{ id: 'record:action', recordId: 'record', planId: 'saved-plan',
+      itemId: item.id, actionVersion: actionFeedbackVersion(item), value: 'too_hard', recordedAt: '2026-10-09T00:00:00Z' }]
+    await open()
+    await generate()
+    draft.adjustmentProposal!.status = 'no_change'
+    draft.adjustmentProposal!.changes = []
+    draft.adjustmentProposal!.summary = '根据上次太累的反馈，保留原方案'
+    const original = JSON.stringify(draft.adjustmentProposal)
+    wrapper.unmount()
+    const returned = mount(PlanDraftView, { attachTo: document.body, global: { plugins: [pinia, router] } })
+    await returned.get('[data-adjustment-trigger]').trigger('click')
+    expect(returned.get('.adjustment-dialog').text()).toContain('根据上次太累的反馈')
+    library.actionFeedback[0]!.value = 'just_right'
+    await flushPromises()
+    expect(returned.get('.adjustment-dialog').text()).not.toContain('上次太累')
+    expect(JSON.stringify(draft.adjustmentProposal)).toBe(original)
+    returned.unmount()
+  })
+
   it('preserves invalid review errors across collapse and focuses the first error before apply', async () => {
     const { wrapper, draft, open, generate } = await setup()
     await open()

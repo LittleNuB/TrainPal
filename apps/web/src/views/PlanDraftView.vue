@@ -111,6 +111,12 @@ const feedbackEvidence = computed(() => {
   }).filter(signal => current.some(entry => entry.itemId === signal.itemId
     && entry.recordedAt === signal.recordedAt && entry.value === signal.value))
 })
+const proposalFeedbackUnavailable = computed(() => {
+  const current = matchingFeedback(draft.plan, library.actionFeedback)
+  return (draft.adjustmentProposal?.context?.signals ?? []).some(signal =>
+    !current.some(entry => entry.itemId === signal.itemId
+      && entry.recordedAt === signal.recordedAt && entry.value === signal.value))
+})
 const contextSummary = computed(() => {
   const context = draft.adjustmentProposal?.context
   if (!context) return '请按当前情况重新生成建议'
@@ -275,7 +281,8 @@ const reasonCopy: Record<AdjustmentReasonCode, string> = {
   extend_recovery: '增加恢复时间，不通过压缩休息提高密度',
 }
 const adjustmentReason = (itemId: string, reason: AdjustmentReasonCode, explanation?: string): string =>
-  reason === 'increase_after_too_easy' && !feedbackEvidence.value.some(signal => signal.itemId === itemId)
+  proposalFeedbackUnavailable.value
+    || (reason === 'increase_after_too_easy' && !feedbackEvidence.value.some(signal => signal.itemId === itemId))
     ? '原反馈已更新或清除，请重新生成建议'
     : explanation ?? reasonCopy[reason]
 
@@ -306,7 +313,7 @@ const openAdjustment = async (event: Event): Promise<void> => {
     review.value = createAdjustmentReview(saved)
     expandedReviewId.value = saved.changes[0]?.itemId ?? null
     adjustmentStep.value = 'preview'
-    if (saved.status === 'no_change') adjustmentNotice.value = saved.summary ?? '当前方案保持不变。'
+    if (saved.status === 'no_change') adjustmentNotice.value = '当前方案保持不变。'
   }
   adjustmentOpen.value = true
   await activateAdjustmentDialog(event.currentTarget as HTMLElement)
@@ -381,7 +388,7 @@ const generateAdjustment = async (force = false): Promise<void> => {
         ? '有不适时不会生成调整；请停止训练，并在需要时寻求专业帮助。'
         : availableMinutes.value !== null && adjustmentIntent.value === 'shorter_session' && proposal.impact.estimatedSecondsBefore <= availableMinutes.value * 60
           ? '当前预计用时已在可用时间内，保留原方案。'
-          : proposal.summary ?? `当前方案保持不变，可以直接编辑动作数字。`
+          : '当前方案保持不变，可以直接编辑动作数字。'
     }
     adjustmentStep.value = 'preview'
     void nextTick(() => {
@@ -1132,7 +1139,7 @@ const retryOperation = async (): Promise<void> => {
           <button v-if="adjustmentStep === 'preview'" type="button" :disabled="generatingAdjustment" @click="generateAdjustment(true)">重新生成建议</button>
         </details>
 
-        <p v-if="adjustmentStep === 'preview' && draft.adjustmentProposal?.origin === 'model' && draft.adjustmentProposal.status === 'ready'" class="adjustment-dialog-notice">{{ draft.adjustmentProposal.summary }}</p>
+        <p v-if="adjustmentStep === 'preview' && draft.adjustmentProposal?.origin === 'model' && !proposalFeedbackUnavailable" class="adjustment-dialog-notice">{{ draft.adjustmentProposal.summary }}</p>
         <p v-if="adjustmentError" class="inline-error" role="alert">{{ adjustmentError }}</p>
         <p v-if="adjustmentNotice" class="adjustment-dialog-notice" role="status">{{ adjustmentNotice }}</p>
         <p v-if="adjustmentContextStale" class="context-stale-note" role="status">

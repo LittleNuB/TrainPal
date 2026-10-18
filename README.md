@@ -56,11 +56,11 @@ Copy-Item .env.example .env.local
 
 在 .env.local 配置 ARK_API_KEY、VOLC_ASR_API_KEY 与对应模型，并准备 FFmpeg；配置项见 [.env.example](.env.example)。GYMTI 的模型增强使用其中独立的 GYMTI 配置。
 
-以下本地配置已完成一次 68 秒视频的真实模型全流程，重复分析仍有格式失败，尚未作为稳定推荐配置。可在 .env.local 显式选择；它保持现有 Ark 服务商，仓库默认配置不自动切换。
+以下本地配置已完成指定 68 秒视频的连续复测和两次真实页面全流程，可在 .env.local 显式选择。它保持现有 Ark 服务商，仓库默认配置不自动切换。
 
 ~~~dotenv
 ARK_MODEL_ID=doubao-seed-2-1-pro-260915
-ARK_VISUAL_MODEL_ID=doubao-seed-2-1-pro-260915
+ARK_VISUAL_MODEL_ID=doubao-seed-2-1-pro-260628
 ARK_ANALYSIS_RESPONSE_FORMAT=json_object
 ~~~
 
