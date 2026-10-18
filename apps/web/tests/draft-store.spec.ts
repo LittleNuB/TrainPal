@@ -99,6 +99,18 @@ describe('方案草稿 store', () => {
     vi.useFakeTimers()
   })
 
+  it('does not multiply an explicit continuous duration into three invented sets', async () => {
+    const store = useDraftStore()
+    await store.load(new MemoryDraftRepository())
+    const activity = candidate('duration-source')
+    activity.parameters = { mode: 'duration', sets: null, reps: null, duration_seconds: 1200, rest_seconds: null }
+    activity.needs_confirmation = true
+    store.applyCandidateProposal([activity])
+    expect(store.items[0]!.sets).toEqual({ value: 1, source: 'rule' })
+    expect(store.items[0]!.durationSeconds).toEqual({ value: 1200, source: 'video' })
+    expect(store.items[0]!.confirmationStatus).toBe('pending')
+  })
+
   it('syncs only a matching saved playback selection while preserving later manual values', async () => {
     const repository = new MemoryDraftRepository()
     const store = useDraftStore()

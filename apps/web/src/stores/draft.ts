@@ -26,6 +26,8 @@ import { normalizeDraftItems } from '@/domain/plan'
 import { playbackFingerprint, validSelection } from '@/domain/playback'
 import { QUICK_EXPERIENCE_PLAN_NAME } from '@/features/quick-experience/fixture'
 import { requestTrainingReminders } from '@/api/reminder-client'
+import { requestPlanAdjustment } from '@/api/adjustment-client'
+import { UserMessageError } from '@/domain/user-message'
 import { currentReminderCache, reminderInput, type ReminderPreferences } from '@/domain/reminders'
 import {
   fingerprintDraftPlan,
@@ -110,7 +112,7 @@ const fromCandidate = (
     confirmationStatus: candidate.needs_confirmation || modeMissing ? 'pending' : 'confirmed',
     mode,
     sets: candidate.parameters.sets === null
-      ? sourced(3, 'rule')
+      ? sourced(!isReps && candidate.parameters.duration_seconds !== null ? 1 : 3, 'rule')
       : sourced(candidate.parameters.sets, 'video'),
     reps: isReps
       ? candidate.parameters.reps === null
@@ -475,6 +477,23 @@ export const useDraftStore = defineStore('draft', () => {
     return generated
   }
 
+  async function proposeModelAdjustment(
+    input: Omit<AdjustmentPolicyInput, 'basePlan'>, signal: AbortSignal,
+  ): Promise<AdjustmentProposal> {
+    const basePlan = cloneJson(plan.value)
+    const generated = await requestPlanAdjustment({ ...input, basePlan }, signal)
+    if (signal.aborted || plan.value.id !== basePlan.id || persistenceSuspended
+      || (plan.value.revision ?? 0) !== (basePlan.revision ?? 0)
+      || fingerprintDraftPlan(plan.value) !== generated.basePlanFingerprint) {
+      throw new UserMessageError('方案已改变，请重新生成调整建议。')
+    }
+    const personalization = plan.value.personalization ?? emptyPersonalization()
+    personalization.proposal = cloneJson(generated)
+    plan.value.personalization = personalization
+    schedulePersist()
+    return generated
+  }
+
   function discardAdjustmentProposal(): void {
     if (!plan.value.personalization?.proposal) return
     plan.value.personalization.proposal = null
@@ -534,7 +553,7 @@ export const useDraftStore = defineStore('draft', () => {
       !proposal
       || proposal.id !== proposalId
       || proposal.status !== 'ready'
-      || proposal.policyVersion !== 'adjustment-policy.v2'
+      || !['adjustment-policy.v2', 'adjustment-policy.v3'].includes(proposal.policyVersion)
       || proposal.basePlanRevision !== (plan.value.revision ?? 0)
       || proposal.basePlanFingerprint !== fingerprintDraftPlan(plan.value)
     ) return 'conflict'
@@ -658,6 +677,7 @@ export const useDraftStore = defineStore('draft', () => {
     duplicate,
     remove,
     proposeAdjustment,
+    proposeModelAdjustment,
     discardAdjustmentProposal,
     applyAdjustmentProposal,
     restoreBasePlan,

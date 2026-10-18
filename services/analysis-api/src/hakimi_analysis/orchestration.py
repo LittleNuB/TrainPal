@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
@@ -37,6 +38,7 @@ from hakimi_analysis.models import (
     VisualLocalizationResult,
     VisualSegment,
 )
+from hakimi_analysis.observability import log_safe_fields
 from hakimi_analysis.pipeline import EmitCallback, PipelineFailure, PipelineOutput
 from hakimi_analysis.providers.base import ProviderError
 from hakimi_analysis.semantic_fusion import SemanticCandidateFusion
@@ -426,6 +428,12 @@ class OrchestratedAnalysisPipeline:
                     visual_context=visual_context,
                     visual_input_binding=visual_input_binding,
                 )
+                if any(code.startswith("unavailable_") for code in fused.diagnostics):
+                    # Raw observations are not actions. A failed grouping must never
+                    # publish a completed plan containing duplicate evidence rows.
+                    raise PipelineFailure(
+                        "provider_error", "动作整理未完成，请重新分析视频", retryable=True
+                    )
                 candidates = fused.candidates
                 warnings.extend(fused.warnings)
             else:
@@ -652,6 +660,13 @@ class OrchestratedAnalysisPipeline:
                         "processed_seconds": processed_seconds,
                         "evidence_count": len(result.segments),
                     },
+                )
+            if failures and failures[-1][0] == window:
+                log_safe_fields(
+                    logging.getLogger(__name__),
+                    source_id=source.id,
+                    stage="analyzing_evidence",
+                    error_code=failures[-1][1].code,
                 )
             if self._evidence_first_ark is not None and failures:
                 # The pilot requires complete readings; do not buy more unusable evidence.

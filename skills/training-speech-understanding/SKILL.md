@@ -1,6 +1,6 @@
 ---
 name: training-speech-understanding
-version: 1.7.0
+version: 1.8.0
 description: Extract all explicit training-action signals from full-source timestamped speech.
 ---
 
@@ -67,6 +67,14 @@ Return JSON only:
 - Never extract or infer creator weight, user weight, body measurements, injury
   risk, exercise quality, or calories.
 - Extract every distinct training action explicitly stated across the full source.
+- Read the entire transcript before choosing occurrences. An opening outline,
+  an umbrella label for several later exercises, or an ending list summarizing
+  already explained exercises is not another execution. Extract the actual
+  teaching occurrence once; preserve a later explicitly instructed round.
+  Equipment adjustment alone is not a training action. A compound overview
+  such as "band and roller warmup" must not become an additional action on top
+  of the separately explained band and roller movements. Keep optional activities
+  when actually proposed, preserving the condition in evidence_text.
 - Set `segment_role` to `follow_along` only when speech explicitly invites the
   viewer to perform the action in sync, and to `teaching_demo` only when speech
   clearly frames the interval as explanation, demonstration, or correction.

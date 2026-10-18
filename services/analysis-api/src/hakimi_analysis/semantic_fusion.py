@@ -161,7 +161,15 @@ def _observations(
                 speech_signals=[signal],
                 visual_segments=[],
             )[0]
-            result.append(_Observation(f"speech-{index}", candidate, signal.segment_role, None, ""))
+            result.append(
+                _Observation(
+                    f"speech-{index}",
+                    candidate,
+                    signal.segment_role,
+                    None,
+                    signal.evidence_text if len(signal.evidence_text) <= 240 else "",
+                )
+            )
     for index, segment in enumerate(visual, 1):
         if segment.is_training_content:
             candidate = fuse_candidates(
@@ -208,7 +216,7 @@ class SemanticCandidateFusion:
         *,
         model: SemanticGroupingModel,
         instructions: str,
-        timeout_seconds: float = 20,
+        timeout_seconds: float = 60,
         reference_catalog: ExerciseReferenceCatalog | None = None,
         allow_touching_teaching: bool = False,
         allow_titled_sequence: bool = False,

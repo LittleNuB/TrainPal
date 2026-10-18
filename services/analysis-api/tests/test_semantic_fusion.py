@@ -123,7 +123,8 @@ async def test_semantic_fusion_unites_different_names_and_preserves_both_sources
         body = json.loads(request.content)
         assert body["store"] is False
         assert [part["type"] for part in body["input"][0]["content"]] == ["input_text"]
-        assert "private transcript fragment" not in request.content.decode()
+        payload = json.loads(body["input"][0]["content"][0]["text"])
+        assert payload["observations"][0]["description"] == "同一动作的合成来源短句"
         return httpx.Response(
             200,
             json={
@@ -158,7 +159,7 @@ async def test_semantic_fusion_unites_different_names_and_preserves_both_sources
                     action_name="俯卧撑",
                     start_seconds=11,
                     end_seconds=19,
-                    evidence_text="private transcript fragment",
+                    evidence_text="同一动作的合成来源短句",
                     reps=12,
                     sets=3,
                     segment_role=SegmentRole.TEACHING_DEMO,

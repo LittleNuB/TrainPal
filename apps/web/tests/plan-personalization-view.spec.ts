@@ -8,6 +8,14 @@ import { useDraftStore } from '@/stores/draft'
 import { useLibraryStore } from '@/stores/library'
 import PlanDraftView from '@/views/PlanDraftView.vue'
 
+vi.mock('@/api/adjustment-client', async () => {
+  const { proposePlanAdjustment } = await import('@/personalization/adjustment-policy')
+  return { requestPlanAdjustment: vi.fn(async (input) => ({
+    ...proposePlanAdjustment(input), policyVersion: 'adjustment-policy.v3', origin: 'model',
+    summary: '合成测试建议',
+  })) }
+})
+
 const setup = async () => {
   const pinia = createPinia()
   setActivePinia(pinia)

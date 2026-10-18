@@ -1,4 +1,4 @@
-export type AdjustmentPolicyVersion = 'adjustment-policy.v1' | 'adjustment-policy.v2'
+export type AdjustmentPolicyVersion = 'adjustment-policy.v1' | 'adjustment-policy.v2' | 'adjustment-policy.v3'
 export type AdjustmentIntent = 'easier_to_finish' | 'more_challenging' | 'shorter_session'
 export type TrainingExperience = 'beginner' | 'intermediate' | 'advanced'
 export type AdjustableField = 'sets' | 'reps' | 'durationSeconds' | 'restSeconds'
@@ -22,10 +22,13 @@ export interface AdjustmentChange {
   before: { value: number; source: 'rule' | 'personalized' }
   after: { value: number; source: 'personalized' }
   reasonCode: AdjustmentReasonCode
+  explanation?: string
   policyBounds: { minimum: number; maximum: number; maximumDelta: number }
 }
 
 export interface AdjustmentProposal {
+  origin?: 'model' | 'protected'
+  summary?: string
   context?: AdjustmentContext
   id: string
   policyVersion: AdjustmentPolicyVersion

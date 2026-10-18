@@ -57,6 +57,11 @@ from hakimi_analysis.models import (
     SourceSummary,
     UpgradeAccessSessionRequest,
 )
+from hakimi_analysis.personalization import (
+    PlanAdjustmentRequest,
+    PlanAdjustmentResponse,
+    PlanAdjustmentService,
+)
 from hakimi_analysis.pipeline import AnalysisPipeline
 from hakimi_analysis.playback import PlaybackChoice, PlaybackRequest, PlaybackService, VoiceCommand
 from hakimi_analysis.providers.base import ProviderError
@@ -274,9 +279,7 @@ async def _until_disconnect[T](request: Request, operation: Awaitable[T]) -> T:
     running = asyncio.ensure_future(operation)
     disconnected = asyncio.create_task(wait_for_disconnect())
     try:
-        done, _ = await asyncio.wait(
-            (running, disconnected), return_when=asyncio.FIRST_COMPLETED
-        )
+        done, _ = await asyncio.wait((running, disconnected), return_when=asyncio.FIRST_COMPLETED)
         if disconnected in done:
             await disconnected
             raise asyncio.CancelledError
@@ -312,6 +315,7 @@ def create_app(
     runtime_cleanup: RuntimeCleanupProbe | None = None,
     playback_service: PlaybackService | None = None,
     reminder_planner: TrainingReminderPlanner | None = None,
+    adjustment_service: PlanAdjustmentService | None = None,
 ) -> FastAPI:
     if (
         not math.isfinite(local_analysis_max_seconds)
@@ -344,6 +348,7 @@ def create_app(
     gymti_model_gate = _NonBlockingConcurrencyGate(gymti_llm_concurrency)
     playback_gate = _NonBlockingConcurrencyGate(2)
     reminder_gate = _NonBlockingConcurrencyGate(2)
+    adjustment_gate = _NonBlockingConcurrencyGate(2)
     readiness_probe = readiness or StaticReadiness(
         "provider_configuration_invalid" if app_env == "production" else None
     )
@@ -377,35 +382,65 @@ def create_app(
     app.state.gymti_service = gymti_service
     app.state.gymti_llm_enabled = gymti_llm_enabled
 
-    # Stream the bounded body before validation; publish that same nested
-    # validator without dangling root $defs references in the operation schema.
-    reminder_schema = ReminderPlanRequest.model_json_schema()
-    reminder_definitions = reminder_schema.pop("$defs")
-
-    def inline_reminder_schema(value: object) -> object:
+    def inline_schema(value: object, definitions: dict[str, object]) -> object:
         if isinstance(value, dict):
             reference = value.get("$ref")
             if isinstance(reference, str):
-                return inline_reminder_schema(
-                    reminder_definitions[reference.removeprefix("#/$defs/")]
-                )
-            return {key: inline_reminder_schema(item) for key, item in value.items()}
+                return inline_schema(definitions[reference.removeprefix("#/$defs/")], definitions)
+            return {key: inline_schema(item, definitions) for key, item in value.items()}
         if isinstance(value, list):
-            return [inline_reminder_schema(item) for item in value]
+            return [inline_schema(item, definitions) for item in value]
         return value
+
+    def bounded_body_schema(schema: dict[str, object]) -> dict[str, object]:
+        definitions = schema.pop("$defs", {})
+        assert isinstance(definitions, dict)
+        return {
+            "requestBody": {
+                "required": True,
+                "content": {
+                    "application/json": {"schema": inline_schema(schema, definitions)},
+                },
+            }
+        }
+
+    @app.post(
+        "/api/v1/plan-adjustments",
+        response_model=PlanAdjustmentResponse,
+        openapi_extra=bounded_body_schema(PlanAdjustmentRequest.model_json_schema()),
+    )
+    async def propose_plan_adjustment(
+        request: Request, response: Response
+    ) -> PlanAdjustmentResponse:
+        _require_same_origin(request, app_env=app_env, development_origins=resolved_cors_origins)
+        if adjustment_service is None:
+            raise HTTPException(status_code=503, detail="AI 调整暂不可用，请稍后重试或直接编辑数字")
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > 64_000:
+                raise HTTPException(status_code=413, detail="方案内容过多，请减少动作后重试")
+        try:
+            payload = PlanAdjustmentRequest.model_validate_json(body)
+        except ValidationError as error:
+            raise HTTPException(status_code=422, detail="方案信息有误，请刷新后重试") from error
+        if not adjustment_gate.try_acquire():
+            raise HTTPException(status_code=429, detail="TrainPal 正忙，请稍后重试")
+        try:
+            proposal = await _until_disconnect(request, adjustment_service.propose(payload))
+        except (ProviderError, ValueError, TimeoutError) as error:
+            raise HTTPException(
+                status_code=503, detail="这次未能生成合适的调整，请重试或直接编辑数字"
+            ) from error
+        finally:
+            adjustment_gate.release()
+        response.headers["Cache-Control"] = "no-store"
+        return proposal
 
     @app.post(
         "/api/v1/training-reminders",
         response_model=ReminderPlan,
-        openapi_extra={
-            "requestBody": {
-                "required": True,
-                "description": "Bounded UTF-8 JSON, at most 64000 bytes; no training-state writes.",
-                "content": {
-                    "application/json": {"schema": inline_reminder_schema(reminder_schema)}
-                },
-            }
-        },
+        openapi_extra=bounded_body_schema(ReminderPlanRequest.model_json_schema()),
     )
     async def plan_training_reminders(request: Request, response: Response) -> ReminderPlan:
         _require_same_origin(request, app_env=app_env, development_origins=resolved_cors_origins)
