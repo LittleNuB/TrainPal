@@ -17,6 +17,7 @@ export function derivePetState(input: PetStateInput): PetState {
     case 'resting':
       return 'resting'
     case 'ready_to_continue':
+    case 'countdown':
       return 'paused'
     case 'paused':
       return input.pauseReason === 'before_start' || input.pauseReason === 'between_actions'

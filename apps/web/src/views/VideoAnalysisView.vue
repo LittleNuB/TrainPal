@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { analysisClient, browserEventStreamFactory } from '@/api/client'
@@ -103,6 +103,12 @@ const initialize = async (): Promise<void> => {
     }
   } finally {
     initializing.value = false
+    await nextTick()
+    const heading = document.querySelector<HTMLElement>('.analysis-page h1')
+    if (heading) {
+      heading.tabIndex = -1
+      heading.focus({ preventScroll: true })
+    }
   }
 }
 
@@ -255,15 +261,15 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
 
     <section v-if="initializing" class="state-card tp-card" aria-live="polite">
       <span class="status-dot status-dot--active" aria-hidden="true" />
-      <div><strong>正在找回这次分析</strong><p>只读取真实任务状态，不会重新创建请求。</p></div>
+      <div><strong>正在找回这次分析</strong><p>正在获取上次的进度，请稍候。</p></div>
     </section>
 
     <template v-else-if="hasSource">
       <section class="source-preview tp-card" aria-labelledby="source-title">
         <div class="source-copy">
-          <p class="tp-kicker">CURRENT SOURCE</p>
+          <p class="tp-kicker">当前视频</p>
           <h1 id="source-title">{{ sourceTitle }}</h1>
-          <p>{{ sourceKind === 'local' ? '本机视频' : '受控示例' }} · {{ formatTime(sourceDuration) }}</p>
+          <p>{{ sourceKind === 'local' ? '本机视频' : '示例视频' }} · {{ formatTime(sourceDuration) }}</p>
         </div>
         <video
           v-if="mediaUrl"
@@ -285,8 +291,8 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
       <section v-if="analysis.restoring || analysis.restoreError" class="state-card tp-card" aria-live="polite">
         <span class="status-dot status-dot--active" aria-hidden="true" />
         <div>
-          <strong>{{ analysis.restoring ? '正在恢复真实进度' : analysis.restoreError }}</strong>
-          <p>{{ analysis.restoring ? '页面离开不会取消这次任务。' : '任务仍保留在服务端短时恢复窗口内。' }}</p>
+          <strong>{{ analysis.restoring ? '正在恢复分析进度' : analysis.restoreError }}</strong>
+          <p>{{ analysis.restoring ? '正在获取上次的进度，请稍候。' : '暂时没能找回进度，请重试。' }}</p>
         </div>
         <button v-if="analysis.restoreError" type="button" @click="retryRestore">重试恢复</button>
       </section>
@@ -294,7 +300,7 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
       <section v-else-if="analysis.isRunning" class="progress-card tp-card" aria-live="polite">
         <div class="progress-heading">
           <div>
-            <p class="tp-kicker">TRAINPAL IS READING</p>
+            <p class="tp-kicker">正在整理动作</p>
             <h2>{{ analysis.stageLabel }}</h2>
           </div>
           <b>{{ formatTime(analysis.processedSeconds) }} / {{ formatTime(progressTotalSeconds) }}</b>
@@ -309,18 +315,17 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
         >
           <i :style="{ width: `${progressPercent}%` }" />
         </div>
-        <div class="discovery-count">
-          <strong>{{ analysis.discoveredCandidateCount }}</strong>
-          <span>个动作线索</span>
+        <details class="discovery-count">
+          <summary>已发现 {{ analysis.discoveredCandidateCount }} 个动作线索</summary>
           <small>{{ analysis.gapRetrying ? `正在重试 ${formatTime(analysis.gapRetrying.start_seconds)}—${formatTime(analysis.gapRetrying.end_seconds)}` : '可以离开，任务会继续' }}</small>
-        </div>
+        </details>
         <button type="button" class="cancel-action" @click="cancelAnalysis">取消分析</button>
       </section>
 
       <section v-else-if="hasProposal" class="completion-card tp-card" aria-labelledby="completion-title">
         <div class="completion-mark" aria-hidden="true">✓</div>
         <div class="completion-copy">
-          <p class="tp-kicker">BASE PLAN READY</p>
+          <p class="tp-kicker">分析结果</p>
           <h2 id="completion-title">训练方案已准备好</h2>
           <p>
             找到 {{ analysis.candidates.length }} 个动作。
@@ -339,12 +344,12 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
         </div>
 
         <div v-if="analysis.coverageStatus === 'insufficient'" class="analysis-warnings" role="status">
-          <p>这次可靠覆盖不足，现有结果不会被当作完整方案。可以重试未覆盖片段，或返回首页更换视频。</p>
+          <p>还有部分内容没能识别，暂时无法生成完整方案。请重试下方片段，或更换视频。</p>
         </div>
 
         <section v-if="analysis.coverageGaps.length" class="coverage-gaps" aria-labelledby="coverage-title">
           <div>
-            <strong id="coverage-title">还有 {{ analysis.coverageGaps.length }} 段未可靠覆盖</strong>
+            <strong id="coverage-title">还有 {{ analysis.coverageGaps.length }} 段未能识别</strong>
             <p>已识别动作仍可进入方案；缺口不会伪装成动作。</p>
           </div>
           <article v-for="gap in analysis.coverageGaps" :key="`${gap.start_seconds}-${gap.end_seconds}`">
@@ -374,11 +379,11 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
       <section v-else-if="analysis.status === 'completed'" class="state-card state-card--stacked tp-card">
         <span class="status-symbol" aria-hidden="true">?</span>
         <div>
-          <strong>{{ analysis.coverageStatus === 'insufficient' ? '可靠覆盖还不够生成方案' : '没有足够可靠的动作证据' }}</strong>
+          <strong>{{ analysis.coverageStatus === 'insufficient' ? '还有内容未识别，暂时无法生成方案' : '暂时没能识别出明确的训练动作' }}</strong>
           <p v-if="analysis.coverageStatus === 'insufficient'">
             已识别的线索不会被当作完整方案。请先重试未覆盖片段，或手工创建动作。
           </p>
-          <p v-else>这不是系统失败。你可以重新分析，或在方案中手工创建动作。</p>
+          <p v-else>可以重新分析，或在方案中手工创建动作。</p>
         </div>
         <section
           v-if="analysis.coverageStatus === 'insufficient' && analysis.coverageGaps.length"
@@ -386,7 +391,7 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
           aria-labelledby="insufficient-coverage-title"
         >
           <div>
-            <strong id="insufficient-coverage-title">还有 {{ analysis.coverageGaps.length }} 段未可靠覆盖</strong>
+            <strong id="insufficient-coverage-title">还有 {{ analysis.coverageGaps.length }} 段未能识别</strong>
             <p>补齐可靠证据后，TrainPal 才会生成基础方案。</p>
           </div>
           <article v-for="gap in analysis.coverageGaps" :key="`${gap.start_seconds}-${gap.end_seconds}`">
@@ -415,7 +420,7 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
         </div>
         <div class="state-actions">
           <button type="button" :disabled="!canRetryWithCurrentSource" @click="retryAnalysis">重试</button>
-          <RouterLink to="/train">使用快速体验方案</RouterLink>
+          <RouterLink to="/train">查看预设方案</RouterLink>
         </div>
       </section>
 
@@ -436,7 +441,7 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
 
       <section v-else class="state-card state-card--stacked tp-card">
         <span class="status-symbol" aria-hidden="true">↗</span>
-        <div><strong>没有进行中的分析</strong><p>请从首页选择视频并明确开始。</p></div>
+        <div><strong>没有进行中的分析</strong><p>请先选择健身视频，再开始分析。</p></div>
         <RouterLink to="/">返回首页</RouterLink>
       </section>
 
@@ -445,7 +450,7 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
 
     <section v-else class="state-card state-card--stacked tp-card">
       <span class="status-symbol" aria-hidden="true">↗</span>
-      <div><strong>没有找到分析来源</strong><p>请从首页选择视频并明确开始。</p></div>
+      <div><h1>没有找到分析来源</h1><p>请先选择健身视频，再开始分析。</p></div>
       <RouterLink to="/">返回首页</RouterLink>
     </section>
 
@@ -460,9 +465,9 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
         tabindex="-1"
         @keydown="handleProposalDialogKeydown"
       >
-        <p class="tp-kicker">CURRENT PLAN EXISTS</p>
+        <p class="tp-kicker">选择方案</p>
         <h2 id="proposal-dialog-title">当前已经有训练方案</h2>
-        <p>选择怎样使用这次分析结果。TrainPal 不会静默覆盖已有内容。</p>
+        <p>这次找到的动作，要加入当前方案，还是替换它？</p>
         <p v-if="proposalError" class="inline-error" role="alert">{{ proposalError }}</p>
         <div class="proposal-options">
           <button
@@ -485,18 +490,18 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
 </template>
 
 <style scoped>
-.analysis-page { display: grid; align-content: start; max-width: 860px; gap: 20px; }
+.analysis-page { display: grid; align-content: start; max-width: 1120px; gap: 20px; }
 .analysis-header { display: grid; grid-template-columns: minmax(44px, auto) 1fr minmax(44px, auto); align-items: center; }
 .analysis-header > span { color: var(--tp-muted); font-size: 13px; font-weight: 800; text-align: center; }
 .back-link { display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid var(--tp-line); border-radius: 50%; color: var(--tp-ink); background: var(--tp-surface); font-size: 22px; text-decoration: none; }
-.plan-link { display: grid; min-height: 44px; place-items: center; padding: 0 12px; border: 1px solid var(--tp-line); border-radius: 999px; color: var(--tp-ink); background: var(--tp-surface); font-size: 12px; font-weight: 800; text-decoration: none; }
+.plan-link { display: grid; min-height: 44px; place-items: center; padding: 0 12px; border: 1px solid var(--tp-line); border-radius: 12px; color: var(--tp-ink); background: var(--tp-surface); font-size: 12px; font-weight: 800; text-decoration: none; }
 
 .source-preview { display: grid; overflow: hidden; }
 .source-copy { display: grid; gap: 5px; padding: 17px 18px; }
 .source-copy h1 { overflow: hidden; margin: 0; color: var(--tp-ink); font-size: clamp(20px, 6vw, 30px); text-overflow: ellipsis; white-space: nowrap; }
 .source-copy > p:last-child { margin: 0; color: var(--tp-muted); font-size: 12px; }
-.source-preview video { display: block; width: 100%; max-height: min(42dvh, 420px); aspect-ratio: 16 / 9; object-fit: contain; background: var(--tp-training-canvas); }
-.media-placeholder { display: grid; min-height: 180px; place-items: center; padding: 24px; color: #CBD0CC; background: var(--tp-training-canvas); text-align: center; }
+.source-preview video { display: block; width: 100%; max-height: min(42dvh, 420px); aspect-ratio: 16 / 9; object-fit: contain; background: var(--tp-media-canvas); }
+.media-placeholder { display: grid; min-height: 180px; place-items: center; padding: 24px; color: var(--tp-muted); background: var(--tp-sage-surface); text-align: center; }
 .media-placeholder span { font-size: 32px; }
 .media-placeholder p { margin: 8px 0 0; font-size: 12px; }
 .inline-warning { margin: 0; padding: 10px 16px; color: #72501B; background: #FFF4DC; font-size: 12px; }
@@ -504,14 +509,15 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
 .state-card { display: flex; align-items: center; gap: 13px; padding: 18px; }
 .state-card > div:not(.state-actions) { flex: 1; }
 .state-card strong { color: var(--tp-ink); font-size: 16px; }
+.state-card h1 { margin: 0; color: var(--tp-ink); font-size: 16px; }
 .state-card p { margin: 5px 0 0; color: var(--tp-muted); font-size: 12px; line-height: 1.6; }
 .state-card button,
 .state-card > a,
-.state-actions a { display: grid; min-height: 44px; place-items: center; padding: 0 15px; border: 1px solid var(--tp-line); border-radius: 999px; color: var(--tp-ink); background: transparent; font-size: 12px; font-weight: 800; text-decoration: none; }
+.state-actions a { display: grid; min-height: 44px; place-items: center; padding: 0 15px; border: 1px solid var(--tp-line); border-radius: 12px; color: var(--tp-ink); background: transparent; font-size: 12px; font-weight: 800; text-decoration: none; }
 .state-card--stacked { display: grid; justify-items: start; }
 .status-dot { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 50%; background: var(--tp-muted); }
-.status-dot--active { background: var(--tp-primary); box-shadow: 0 0 0 5px rgb(217 75 43 / 12%); animation: pulse 1.5s ease-in-out infinite; }
-.status-symbol { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 50%; color: var(--tp-ink); background: var(--tp-secondary); font: 800 20px/1 var(--font-display); }
+.status-dot--active { background: var(--tp-primary); box-shadow: 0 0 0 5px rgb(25 205 192 / 12%); animation: pulse 1.5s ease-in-out infinite; }
+.status-symbol { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 50%; color: #FFFFFF; background: var(--tp-secondary); font: 800 20px/1 var(--font-display); }
 .status-symbol--error { color: var(--tp-surface); background: var(--tp-danger); }
 .state-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
@@ -519,13 +525,13 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
 .progress-heading { display: flex; align-items: end; justify-content: space-between; gap: 12px; }
 .progress-heading h2 { margin: 6px 0 0; color: var(--tp-training-ink); font-size: 23px; }
 .progress-heading b { color: var(--tp-secondary); font: 700 15px/1 var(--font-display); white-space: nowrap; }
-.progress-track { height: 7px; overflow: hidden; border-radius: 999px; background: rgb(247 243 233 / 12%); }
+.progress-track { height: 7px; overflow: hidden; border-radius: 12px; background: var(--tp-line); }
 .progress-track i { display: block; height: 100%; border-radius: inherit; background: var(--tp-secondary); transition: width .25s ease; }
-.discovery-count { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 0 8px; }
+.discovery-count summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-size: 14px; }
 .discovery-count strong { color: var(--tp-training-ink); font: 700 42px/1 var(--font-display); }
 .discovery-count span { color: var(--tp-training-ink); font-size: 13px; font-weight: 800; }
-.discovery-count small { grid-column: 1 / -1; margin-top: 5px; color: #B9C0BB; font-size: 11px; }
-.cancel-action { justify-self: start; min-height: 44px; padding: 0 15px; border: 1px solid rgb(247 243 233 / 25%); border-radius: 999px; color: var(--tp-training-ink); background: transparent; }
+.discovery-count small { grid-column: 1 / -1; margin-top: 5px; color: var(--tp-muted); font-size: 11px; }
+.cancel-action { justify-self: start; min-height: 44px; padding: 0 15px; border: 1px solid var(--tp-line); border-radius: 12px; color: var(--tp-training-ink); background: transparent; }
 
 .completion-card { display: grid; grid-template-columns: auto 1fr; gap: 14px; padding: 21px; }
 .completion-mark { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 50%; color: var(--tp-surface); background: var(--tp-primary); font-size: 23px; font-weight: 900; }
@@ -557,7 +563,7 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
 .proposal-dialog > p:not(.tp-kicker, .inline-error) { margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.6; }
 .proposal-options { display: grid; gap: 8px; }
 .proposal-options button { display: grid; min-height: 70px; gap: 4px; padding: 13px 15px; border: 1px solid var(--tp-line); border-radius: 15px; color: var(--tp-ink); background: transparent; text-align: left; }
-.proposal-options .append-option { border-color: var(--tp-primary); background: rgb(217 75 43 / 5%); }
+.proposal-options .append-option { border-color: var(--tp-primary); background: rgb(25 205 192 / 5%); }
 .proposal-options strong { font-size: 14px; }
 .proposal-options span { color: var(--tp-muted); font-size: 11px; line-height: 1.5; }
 .cancel-option { min-height: 44px; border: 0; color: var(--tp-muted); background: transparent; font-weight: 800; }
@@ -575,5 +581,14 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
 @media (prefers-reduced-motion: reduce) {
   .status-dot--active { animation: none; }
   .progress-track i { transition: none; }
+}
+@media (min-width: 1024px) {
+  .analysis-page { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); align-items: start; gap: 24px 32px; }
+  .analysis-header { grid-column: 1 / -1; }
+  .source-preview { grid-column: 1; display: flex; flex-direction: column; }
+  .source-copy { width: 100%; padding: 22px; }
+  .source-preview video { max-height: 420px; }
+  .state-card, .progress-card, .completion-card { grid-column: 2; }
+  .source-error { grid-column: 1 / -1; }
 }
 </style>

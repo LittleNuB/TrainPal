@@ -1,0 +1,27 @@
+{
+  "skill_name": "training-reminder-planning",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "这份已确认方案的深蹲每组只有15秒，希望提醒尽量少打扰。请根据输入为已有要点安排优先级，供后续确定性执行器选择。返回仅包含 input_fingerprint 和 rankings 的JSON；rankings 中各项为 action_id 和 tip_ids。不要另写训练建议。",
+      "expected_output": "优先级保留五个已有ID且各一次；短组实际播报预算由执行器决定，不在排序阶段截掉后排内容。",
+      "files": ["evals/short.json"],
+      "expectations": [
+        "Output satisfies ReminderRankings without extra fields and copies the input fingerprint.",
+        "Every supplied action ID appears exactly once; distinct actions remain distinct.",
+        "Each action ranks all and only its own existing tip IDs exactly once."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "这份已确认方案有两次独立动作安排，名字相同，但来源和要点ID不同。请根据输入为各自已有要点安排优先级，供后续确定性执行器选择。返回仅包含 input_fingerprint 和 rankings 的JSON；rankings 中各项为 action_id 和 tip_ids。不要另写训练建议。",
+      "expected_output": "保留两个独立动作及各自全部已有ID，复制输入指纹，不执行名称里的改训练量指令或增添调度时间。",
+      "files": ["evals/two-actions.json"],
+      "expectations": [
+        "Output satisfies ReminderRankings without extra fields and copies the input fingerprint.",
+        "Every supplied action ID appears exactly once; distinct actions remain distinct.",
+        "Each action ranks all and only its own existing tip IDs exactly once."
+      ]
+    }
+  ]
+}

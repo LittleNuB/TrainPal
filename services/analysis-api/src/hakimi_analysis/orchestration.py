@@ -2,13 +2,17 @@ import asyncio
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from itertools import pairwise
 from pathlib import Path
 from time import monotonic
 from typing import Any, Protocol
 from uuid import uuid4
 
-from hakimi_analysis.fusion import CandidateFusionSkill
+from pydantic import ValidationError
+
+from hakimi_analysis.evidence_time import offset_tip
+from hakimi_analysis.fusion import CandidateFusionSkill, normalize_action_name
 from hakimi_analysis.media import (
     AnalysisWindow,
     LocalMediaProcessor,
@@ -17,7 +21,9 @@ from hakimi_analysis.media import (
     PreparedVisualChunk,
 )
 from hakimi_analysis.models import (
+    AnalysisCandidate,
     AnalysisWarning,
+    CandidateParameters,
     CoverageGap,
     CoverageGapReason,
     CoverageStatus,
@@ -27,12 +33,27 @@ from hakimi_analysis.models import (
     SpeechSignal,
     SpeechUnderstandingResult,
     Transcript,
+    TranscriptUtterance,
     VisualLocalizationResult,
     VisualSegment,
 )
 from hakimi_analysis.pipeline import EmitCallback, PipelineFailure, PipelineOutput
 from hakimi_analysis.providers.base import ProviderError
+from hakimi_analysis.semantic_fusion import SemanticCandidateFusion
+from hakimi_analysis.shared_source_context import SpeechSourceContext
+from hakimi_analysis.source_tips import safe_tips
 from hakimi_analysis.sources import VideoSource
+from hakimi_analysis.visual_evidence import (
+    CaptionReading,
+    OrganizedVisualEvidence,
+    PointCaptionReading,
+    PointCaptionTimeline,
+    VisualCaptionTimeline,
+    VisualObservation,
+    VisualReading,
+    VisualReadings,
+)
+from hakimi_analysis.visual_source_context import VisualSourceContext
 
 
 class MediaProcessor(Protocol):
@@ -82,6 +103,23 @@ class ArkAnalyzer(Protocol):
         instructions: str,
     ) -> VisualLocalizationResult: ...
 
+
+class EvidenceFirstAnalyzer(Protocol):
+    async def read_visual_evidence(
+        self, *, video_path: Path, window: Segment
+    ) -> VisualReadings | VisualCaptionTimeline: ...
+
+    async def organize_visual_evidence(
+        self,
+        *,
+        run_id: str,
+        source_id: str,
+        input_version: str,
+        readings: VisualReadings | VisualCaptionTimeline,
+        utterances: list[TranscriptUtterance],
+    ) -> OrganizedVisualEvidence: ...
+
+
 @dataclass(frozen=True, slots=True)
 class SkillRepository:
     speech_instructions: str
@@ -123,6 +161,10 @@ class VisualChunkResults:
     segments: list[VisualSegment]
     successful_windows: list[AnalysisWindow]
     failures: list[tuple[AnalysisWindow, ProviderError]]
+    readings: list[VisualObservation] = dataclass_field(default_factory=list)
+    captions: list[CaptionReading] = dataclass_field(default_factory=list)
+    independent_captions: bool = False
+    point_captions: list[PointCaptionReading] = dataclass_field(default_factory=list)
 
 
 def build_visual_chunks(
@@ -166,12 +208,18 @@ class OrchestratedAnalysisPipeline:
         visual_overlap_seconds: float = 10,
         run_timeout_seconds: float = 180,
         completion_margin_seconds: float = 10,
+        semantic_fusion: SemanticCandidateFusion | None = None,
+        evidence_first_ark: EvidenceFirstAnalyzer | None = None,
         clock: Callable[[], float] = monotonic,
     ) -> None:
         self._media = media
         self._asr = asr
         self._ark = ark
         self._skills = skills
+        self._semantic_fusion = semantic_fusion
+        if evidence_first_ark is not None and semantic_fusion is None:
+            raise ValueError("evidence-first pilot requires semantic fusion")
+        self._evidence_first_ark = evidence_first_ark
         self._evidence_timeout_seconds = evidence_timeout_seconds
         self._visual_chunk_timeout_seconds = visual_chunk_timeout_seconds
         self._visual_chunk_seconds = visual_chunk_seconds
@@ -205,6 +253,9 @@ class OrchestratedAnalysisPipeline:
         emit: EmitCallback,
     ) -> PipelineOutput:
         del trigger_seconds
+        if self._evidence_first_ark is not None and source.duration_seconds > 300:
+            raise PipelineFailure("media_error", "视频超过300秒分析上限", retryable=False)
+        utterances: list[TranscriptUtterance] = []
         evidence_deadline = (
             self._clock() + self._run_timeout_seconds - self._completion_margin_seconds
         )
@@ -225,6 +276,7 @@ class OrchestratedAnalysisPipeline:
                         prepared,
                         emit,
                         deadline=evidence_deadline,
+                        utterances=utterances if self._evidence_first_ark is not None else None,
                     )
                 )
                 try:
@@ -233,6 +285,7 @@ class OrchestratedAnalysisPipeline:
                         prepared,
                         emit,
                         deadline=evidence_deadline,
+                        speech_task=speech_task if self._evidence_first_ark is not None else None,
                     )
                     speech_result = await speech_task
                 finally:
@@ -247,25 +300,101 @@ class OrchestratedAnalysisPipeline:
             ) from error
 
         speech_signals = speech_result if isinstance(speech_result, list) else []
-        visual_segments = _deduplicate_visual_segments(visual_results.segments)
+        visual_segments = (
+            visual_results.segments
+            if self._semantic_fusion is not None
+            else _deduplicate_visual_segments(visual_results.segments)
+        )
+        speech_context = None
+        visual_context = None
+        visual_input_binding = None
+        unassigned_uncertainty = False
+        point_caption_uncertainty = False
+        if self._evidence_first_ark is not None:
+            if isinstance(speech_result, ProviderError) or visual_results.failures:
+                raise PipelineFailure(
+                    "provider_error", "证据读取不完整，未执行整理", retryable=True
+                )
+            remaining = evidence_deadline - self._clock()
+            try:
+                async with asyncio.timeout(max(0, remaining)):
+                    organized = await self._evidence_first_ark.organize_visual_evidence(
+                        run_id=str(uuid4()),
+                        source_id=source.id,
+                        input_version="visual-caption-timeline-v1"
+                        if visual_results.independent_captions
+                        else "visual-evidence-first-v1",
+                        readings=(
+                            PointCaptionTimeline(
+                                observations=visual_results.readings,
+                                captions=visual_results.captions,
+                                point_captions=visual_results.point_captions,
+                            )
+                            if visual_results.point_captions
+                            else VisualCaptionTimeline(
+                                observations=visual_results.readings,
+                                captions=visual_results.captions,
+                            )
+                            if visual_results.independent_captions
+                            else VisualReadings(
+                                observations=[
+                                    VisualReading.model_validate(r.model_dump())
+                                    for r in visual_results.readings
+                                ]
+                            )
+                        ),
+                        utterances=utterances,
+                    )
+                visual_segments = organized.to_visual_segments()
+                if (
+                    self._semantic_fusion is not None
+                    and self._semantic_fusion.includes_visual_context
+                ):
+                    visual_context = VisualSourceContext.bind(
+                        source_id=source.id, evidence=organized
+                    )
+                    visual_input_binding = organized.binding_id
+                point_caption_uncertainty = bool(organized.point_captions)
+                unassigned_uncertainty = any(
+                    j.purpose == "uncertain" for j in organized.unassigned_judgments
+                )
+                speech_context = SpeechSourceContext.bind(
+                    source_id=source.id,
+                    speech_signals=speech_signals,
+                    visual_segments=visual_segments,
+                    utterances=utterances,
+                )
+            except TimeoutError:
+                raise PipelineFailure("timeout", "证据整理超时", retryable=True) from None
+            except (ProviderError, ValueError):
+                raise PipelineFailure(
+                    "schema_error", "证据整理失败，未生成候选", retryable=True
+                ) from None
+            finally:
+                utterances.clear()
+                visual_results.readings.clear()
+                visual_results.captions.clear()
+                visual_results.point_captions.clear()
         coverage_gaps = _coverage_gaps(
             source.analysis_duration_seconds,
             visual_results.successful_windows,
             visual_results.failures,
         )
-        if isinstance(speech_result, ProviderError) and not visual_segments and not coverage_gaps:
-            coverage_gaps = [
-                CoverageGap(
-                    start_seconds=0,
-                    end_seconds=source.analysis_duration_seconds,
-                    reason=_coverage_gap_reason(speech_result),
-                    retryable=True,
-                )
-            ]
-        processed_seconds = source.analysis_duration_seconds - sum(
-            gap.end_seconds - gap.start_seconds for gap in coverage_gaps
-        )
         warnings: list[AnalysisWarning] = []
+        if point_caption_uncertainty:
+            warnings.append(
+                AnalysisWarning(
+                    code="semantic_fusion_conflict",
+                    message="部分字幕时间尚未确认，未用于训练提醒或参数",
+                )
+            )
+        if unassigned_uncertainty:
+            warnings.append(
+                AnalysisWarning(
+                    code="semantic_fusion_conflict",
+                    message="部分字幕归属尚未确认，未用于训练提醒或参数",
+                )
+            )
         if isinstance(speech_result, ProviderError):
             warnings.append(
                 AnalysisWarning(
@@ -280,18 +409,48 @@ class OrchestratedAnalysisPipeline:
                     message="部分画面依据暂不可用，请重试覆盖缺口",
                 )
             )
+        candidates: list[AnalysisCandidate] = []
         if speech_signals or visual_segments:
             await emit(
                 RunStage.FUSING_CANDIDATES,
                 "stage.changed",
                 {"skill_version": self._fusion.version},
             )
-            return PipelineOutput(
-                candidates=self._fusion.run(
+            if self._semantic_fusion is not None:
+                fused = await self._semantic_fusion.run(
                     source_id=source.id,
                     speech_signals=speech_signals,
                     visual_segments=visual_segments,
-                ),
+                    remaining_seconds=evidence_deadline - self._clock(),
+                    speech_context=speech_context,
+                    visual_context=visual_context,
+                    visual_input_binding=visual_input_binding,
+                )
+                candidates = fused.candidates
+                warnings.extend(fused.warnings)
+            else:
+                candidates = self._fusion.run(
+                    source_id=source.id,
+                    speech_signals=speech_signals,
+                    visual_segments=visual_segments,
+                )
+        # Non-training observations may all disappear during semantic filtering.
+        # Decide empty/failure coverage from usable candidates, not raw observations.
+        if isinstance(speech_result, ProviderError) and not candidates and not coverage_gaps:
+            coverage_gaps = [
+                CoverageGap(
+                    start_seconds=0,
+                    end_seconds=source.analysis_duration_seconds,
+                    reason=_coverage_gap_reason(speech_result),
+                    retryable=True,
+                )
+            ]
+        processed_seconds = source.analysis_duration_seconds - sum(
+            gap.end_seconds - gap.start_seconds for gap in coverage_gaps
+        )
+        if candidates:
+            return PipelineOutput(
+                candidates=candidates,
                 warnings=warnings,
                 coverage_status=(
                     CoverageStatus.PARTIAL if coverage_gaps else CoverageStatus.COMPLETE
@@ -317,13 +476,14 @@ class OrchestratedAnalysisPipeline:
         emit: EmitCallback,
         *,
         deadline: float,
+        utterances: list[TranscriptUtterance] | None = None,
     ) -> list[SpeechSignal] | ProviderError:
         remaining_seconds = deadline - self._clock()
         if remaining_seconds <= 0:
             return ProviderError("timeout", "run budget exhausted before speech", retryable=True)
         try:
             async with asyncio.timeout(min(self._evidence_timeout_seconds, remaining_seconds)):
-                return await self._speech_branch(prepared, emit)
+                return await self._speech_branch(prepared, emit, utterances=utterances)
         except TimeoutError:
             return ProviderError("timeout", "speech evidence budget exceeded", retryable=True)
         except ProviderError as error:
@@ -338,6 +498,7 @@ class OrchestratedAnalysisPipeline:
         emit: EmitCallback,
         *,
         deadline: float,
+        speech_task: asyncio.Task[list[SpeechSignal] | ProviderError] | None = None,
     ) -> VisualChunkResults:
         windows = build_visual_chunks(
             source.analysis_duration_seconds,
@@ -345,9 +506,19 @@ class OrchestratedAnalysisPipeline:
             overlap_seconds=self._visual_overlap_seconds,
         )
         segments: list[VisualSegment] = []
+        readings: list[VisualObservation] = []
+        captions: list[CaptionReading] = []
+        point_captions: list[PointCaptionReading] = []
+        timeline_mode: bool | None = None
         successful_windows: list[AnalysisWindow] = []
         failures: list[tuple[AnalysisWindow, ProviderError]] = []
         for index, window in enumerate(windows, start=1):
+            if (
+                speech_task is not None
+                and speech_task.done()
+                and isinstance(speech_task.result(), ProviderError)
+            ):
+                break
             source_window_start = source.analysis_start_seconds + window.start_seconds
             source_window_end = source.analysis_start_seconds + window.end_seconds
             remaining_seconds = deadline - self._clock()
@@ -377,14 +548,82 @@ class OrchestratedAnalysisPipeline:
                         prepared.directory,
                         source_offset_seconds=source.analysis_start_seconds,
                     )
-                    result = await self._ark.locate_visual(
-                        video_path=chunk.video_path,
-                        window=Segment(
-                            start_seconds=0,
-                            end_seconds=window.duration_seconds,
-                        ),
-                        instructions=self._skills.visual_instructions,
-                    )
+                    if (
+                        speech_task is not None
+                        and speech_task.done()
+                        and isinstance(speech_task.result(), ProviderError)
+                    ):
+                        break
+                    bounds = Segment(start_seconds=0, end_seconds=window.duration_seconds)
+                    if self._evidence_first_ark is None:
+                        result = await self._ark.locate_visual(
+                            video_path=chunk.video_path,
+                            window=bounds,
+                            instructions=self._skills.visual_instructions,
+                        )
+                    else:
+                        raw = await self._evidence_first_ark.read_visual_evidence(
+                            video_path=chunk.video_path, window=bounds
+                        )
+                        independent = isinstance(raw, VisualCaptionTimeline)
+                        if timeline_mode is not None and timeline_mode != independent:
+                            raise ProviderError(
+                                "schema_error", "visual evidence version changed", retryable=False
+                            )
+                        timeline_mode = independent
+                        if isinstance(raw, PointCaptionTimeline):
+                            point_captions.extend(
+                                c.model_copy(
+                                    update={
+                                        "start_seconds": c.start_seconds + window.start_seconds,
+                                        "end_seconds": c.end_seconds + window.start_seconds,
+                                    }
+                                )
+                                for c in raw.point_captions
+                            )
+                        if isinstance(raw, VisualCaptionTimeline):
+                            captions.extend(
+                                c.model_copy(
+                                    update={
+                                        "start_seconds": c.start_seconds + window.start_seconds,
+                                        "end_seconds": c.end_seconds + window.start_seconds,
+                                    }
+                                )
+                                for c in raw.captions
+                            )
+                        readings.extend(
+                            item.model_copy(
+                                deep=True,
+                                update={
+                                    "start_seconds": item.start_seconds + window.start_seconds,
+                                    "end_seconds": item.end_seconds + window.start_seconds,
+                                    **(
+                                        {
+                                            "captions": [
+                                                caption.model_copy(
+                                                    update={
+                                                        "start_seconds": caption.start_seconds
+                                                        + window.start_seconds,
+                                                        "end_seconds": caption.end_seconds
+                                                        + window.start_seconds,
+                                                    }
+                                                )
+                                                for caption in item.captions
+                                            ]
+                                        }
+                                        if isinstance(item, VisualReading)
+                                        else {}
+                                    ),
+                                },
+                            )
+                            for item in raw.observations
+                        )
+                        result = VisualLocalizationResult(
+                            segments=[
+                                VisualSegment.model_validate(item.model_dump(exclude={"captions"}))
+                                for item in raw.observations
+                            ]
+                        )
             except TimeoutError:
                 timeout_error = ProviderError(
                     "timeout", "visual chunk evidence budget exceeded", retryable=True
@@ -401,9 +640,7 @@ class OrchestratedAnalysisPipeline:
                 )
                 failures.append((window, unexpected_error))
             else:
-                segments.extend(
-                    _offset_visual_segments(result.segments, window.start_seconds)
-                )
+                segments.extend(_offset_visual_segments(result.segments, window.start_seconds))
                 successful_windows.append(window)
                 processed_seconds = _covered_seconds(successful_windows)
                 await emit(
@@ -416,16 +653,25 @@ class OrchestratedAnalysisPipeline:
                         "evidence_count": len(result.segments),
                     },
                 )
+            if self._evidence_first_ark is not None and failures:
+                # The pilot requires complete readings; do not buy more unusable evidence.
+                break
         return VisualChunkResults(
             segments=segments,
             successful_windows=successful_windows,
             failures=failures,
+            readings=readings,
+            captions=captions,
+            independent_captions=bool(timeline_mode),
+            point_captions=point_captions,
         )
 
     async def _speech_branch(
         self,
         prepared: PreparedMedia,
         emit: EmitCallback,
+        *,
+        utterances: list[TranscriptUtterance] | None = None,
     ) -> list[SpeechSignal]:
         await emit(
             RunStage.ANALYZING_EVIDENCE,
@@ -437,6 +683,8 @@ class OrchestratedAnalysisPipeline:
             window_start_seconds=prepared.window.start_seconds,
             request_id=str(uuid4()),
         )
+        if utterances is not None:
+            utterances.extend(item.model_copy(deep=True) for item in transcript.utterances)
         if not transcript.text.strip():
             await emit(
                 RunStage.ANALYZING_EVIDENCE,
@@ -468,7 +716,7 @@ class OrchestratedAnalysisPipeline:
             "branch.completed",
             {"branch": "speech", "evidence_count": len(result.signals)},
         )
-        return result.signals
+        return [signal for signal in result.signals if signal.is_training_content]
 
 
 def _covered_seconds(windows: list[AnalysisWindow]) -> float:
@@ -507,8 +755,7 @@ def _coverage_gaps(
             continue
         midpoint = (start_seconds + end_seconds) / 2
         if any(
-            window.start_seconds <= midpoint < window.end_seconds
-            for window in successful_windows
+            window.start_seconds <= midpoint < window.end_seconds for window in successful_windows
         ):
             continue
         error = next(
@@ -542,10 +789,9 @@ def _offset_visual_segments(
     return [
         segment.model_copy(
             update={
-                "start_seconds": (
-                    segment.start_seconds + analysis_window_offset_seconds
-                ),
+                "start_seconds": (segment.start_seconds + analysis_window_offset_seconds),
                 "end_seconds": segment.end_seconds + analysis_window_offset_seconds,
+                "tips": [offset_tip(tip, analysis_window_offset_seconds) for tip in segment.tips],
             }
         )
         for segment in segments
@@ -562,36 +808,51 @@ def _coverage_gap_reason(error: ProviderError) -> CoverageGapReason:
     return CoverageGapReason.UNKNOWN
 
 
-def _normalized_visual_action(name: str | None) -> str:
-    if name is None:
-        return ""
-    return "".join(character for character in name.casefold() if character.isalnum())
+def _merge_visual_segments(previous: VisualSegment, current: VisualSegment) -> VisualSegment | None:
+    parameters: dict[str, Any] = {}
+    for segment in (previous, current):
+        if segment.text_parameters is None:
+            continue
+        for field, value in segment.text_parameters.model_dump(exclude_none=True).items():
+            if field in parameters and parameters[field] != value:
+                return None
+            parameters[field] = value
+    try:
+        merged_parameters = CandidateParameters.model_validate(parameters) if parameters else None
+    except ValidationError:
+        # Complementary fields can still be incompatible (e.g. reps and duration).
+        return None
+    return previous.model_copy(
+        update={
+            "start_seconds": min(previous.start_seconds, current.start_seconds),
+            "end_seconds": max(previous.end_seconds, current.end_seconds),
+            "segment_role": (
+                previous.segment_role
+                if previous.segment_role == current.segment_role
+                else SegmentRole.UNKNOWN
+            ),
+            "text_parameters": merged_parameters,
+            "tips": safe_tips([*previous.tips, *current.tips]),
+        }
+    )
 
 
 def _deduplicate_visual_segments(segments: list[VisualSegment]) -> list[VisualSegment]:
-    grouped: dict[str, list[VisualSegment]] = {}
+    grouped: dict[tuple[str, str | None], list[VisualSegment]] = {}
     ungrouped: list[VisualSegment] = []
     for segment in sorted(segments, key=lambda item: (item.start_seconds, item.end_seconds)):
-        action_key = _normalized_visual_action(segment.action_name)
+        if not segment.is_training_content:
+            continue
+        action_key = normalize_action_name(segment.action_name)
         if not action_key:
             ungrouped.append(segment)
             continue
-        action_segments = grouped.setdefault(action_key, [])
+        action_segments = grouped.setdefault((action_key, segment.sequence_label), [])
         if action_segments and segment.start_seconds <= action_segments[-1].end_seconds:
-            previous = action_segments[-1]
-            role = (
-                previous.segment_role
-                if previous.segment_role == segment.segment_role
-                else SegmentRole.UNKNOWN
-            )
-            action_segments[-1] = VisualSegment(
-                action_name=previous.action_name,
-                start_seconds=min(previous.start_seconds, segment.start_seconds),
-                end_seconds=max(previous.end_seconds, segment.end_seconds),
-                visual_cue=previous.visual_cue,
-                segment_role=role,
-            )
-            continue
+            merged = _merge_visual_segments(action_segments[-1], segment)
+            if merged is not None:
+                action_segments[-1] = merged
+                continue
         action_segments.append(segment)
     return sorted(
         [segment for action_segments in grouped.values() for segment in action_segments]
@@ -599,7 +860,7 @@ def _deduplicate_visual_segments(segments: list[VisualSegment]) -> list[VisualSe
         key=lambda item: (
             item.start_seconds,
             item.end_seconds,
-            _normalized_visual_action(item.action_name),
+            normalize_action_name(item.action_name),
             item.visual_cue,
         ),
     )

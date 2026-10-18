@@ -81,14 +81,14 @@ describe('web experience design contract', () => {
     expect(violations).toEqual([])
   })
 
-  it('publishes the frozen TrainPal semantic color tokens', () => {
+  it('publishes the approved sport AI palette with a light training stage', () => {
     const baseStyles = readFileSync(resolve(sourceRoot, 'styles/base.css'), 'utf8')
 
-    expect(baseStyles).toMatch(/--tp-canvas\s*:\s*#F3EFE5/i)
-    expect(baseStyles).toMatch(/--tp-surface\s*:\s*#FFFDF8/i)
-    expect(baseStyles).toMatch(/--tp-primary\s*:\s*#D94B2B/i)
-    expect(baseStyles).toMatch(/--tp-secondary\s*:\s*#A5BA63/i)
-    expect(baseStyles).toMatch(/--tp-training-canvas\s*:\s*#0E1311/i)
+    expect(baseStyles).toMatch(/--tp-canvas\s*:\s*#F8FBFC/i)
+    expect(baseStyles).toMatch(/--tp-surface\s*:\s*#FFFFFF/i)
+    expect(baseStyles).toMatch(/--tp-primary\s*:\s*#19CDC0/i)
+    expect(baseStyles).toMatch(/--tp-secondary\s*:\s*#076D63/i)
+    expect(baseStyles).toMatch(/--tp-training-canvas\s*:\s*var\(--tp-canvas\)/i)
     expect(baseStyles).toMatch(/--tp-focus\s*:\s*#2459D6/i)
   })
 
@@ -97,7 +97,7 @@ describe('web experience design contract', () => {
     const muted = baseStyles.match(/--tp-muted\s*:\s*(#[0-9a-f]{6})/i)?.[1]
 
     expect(muted).toBeDefined()
-    for (const background of ['#F3EFE5', '#FFFDF8', '#FFF9ED', '#EAE6DC']) {
+    for (const background of ['#F8FBFC', '#FFFFFF', '#EAF8F6', '#FFF9ED', '#E9F0F5']) {
       expect(contrastRatio(muted ?? '', background), `${muted} on ${background}`).toBeGreaterThanOrEqual(4.5)
     }
   })

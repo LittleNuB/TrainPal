@@ -6,6 +6,43 @@ const controlledMediaRoot = fileURLToPath(
   new URL('../../../../tmp/e2e-sources/', import.meta.url),
 )
 
+test('a failed result read can restore the same analysis without creating or cancelling a run', async ({ page }) => {
+  const createdRuns: string[] = []
+  const cancelledRuns: string[] = []
+  let resultReadFailed = false
+  await page.route('**/api/v1/analysis-runs', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue()
+    const response = await route.fetch()
+    createdRuns.push((await response.json()).id as string)
+    await route.fulfill({ response })
+  })
+  await page.route('**/api/v1/analysis-runs/*', async (route) => {
+    const runId = new URL(route.request().url()).pathname.split('/').at(-1)!
+    if (route.request().method() === 'DELETE') cancelledRuns.push(runId)
+    if (route.request().method() === 'GET' && runId === createdRuns[0] && !resultReadFailed) {
+      resultReadFailed = true
+      await route.abort('failed')
+      return
+    }
+    await route.continue()
+  })
+
+  await page.goto('/')
+  await page.locator('.quick-real-section > summary').click()
+  await page.locator('.quick-video-branch > summary').click()
+  await page.getByRole('button', { name: '0:02', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: '确认并开始' }).click()
+  await expect(page.getByRole('button', { name: '重试恢复' })).toBeVisible()
+  await expect(page.getByText('暂时没能找回进度，请重试。')).toBeVisible()
+  await page.getByRole('button', { name: '重试恢复' }).click()
+  await expect(page.getByRole('heading', { name: '训练方案已准备好' })).toBeVisible()
+  await page.reload()
+  await expect(page.getByRole('heading', { name: '训练方案已准备好' })).toBeVisible()
+  expect(resultReadFailed).toBe(true)
+  expect(createdRuns).toHaveLength(1)
+  expect(cancelledRuns).toEqual([])
+})
+
 test('video result becomes a base plan, resolves uncertainty, and restores from the current plan', async ({ page }) => {
   await page.route('**/api/v1/sources/*/media', async (route) => {
     const sourceId = new URL(route.request().url()).pathname.split('/').at(-2) ?? ''
@@ -17,7 +54,7 @@ test('video result becomes a base plan, resolves uncertainty, and restores from 
   })
 
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: /刷到的动作/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /把视频整理成训练方案/ })).toBeVisible()
 
   const primaryNavigation = page.getByRole('navigation', { name: '主要导航' })
   for (const target of ['首页', '训练', '我的'].map((name) => (
@@ -29,6 +66,8 @@ test('video result becomes a base plan, resolves uncertainty, and restores from 
     expect(box!.height).toBeGreaterThanOrEqual(44)
   }
 
+  await page.locator('.quick-real-section > summary').click()
+  await page.locator('.quick-video-branch > summary').click()
   await page.getByRole('button', { name: '0:02', exact: true }).click()
   await page.getByRole('dialog').getByRole('button', { name: '确认并开始' }).click()
   await expect(page).toHaveURL(/\/analysis$/)
@@ -44,6 +83,7 @@ test('video result becomes a base plan, resolves uncertainty, and restores from 
   await expect(page.getByRole('heading', { name: '当前训练方案' })).toBeVisible()
   await expect(page.getByText('待确认', { exact: true })).toBeVisible()
   await page.locator('.plan-card').first().locator('.action-summary').click()
+  await page.locator('[data-full-editor]').click()
   await expect(
     page.locator('.action-sheet').getByRole('textbox', { name: '动作名称' }),
   ).toHaveValue('拖拽弯举')
@@ -52,7 +92,10 @@ test('video result becomes a base plan, resolves uncertainty, and restores from 
   await firstConfirmationSheet.getByRole('button', { name: '确认并加入' }).click()
   await expect(firstConfirmationSheet).toBeHidden()
 
-  await page.getByRole('link', { name: '返回首页' }).click()
+  await page.getByRole('link', { name: '返回训练' }).click()
+  await page.getByRole('navigation', { name: '主要导航' }).getByRole('link', { name: '首页', exact: true }).click()
+  await page.locator('.quick-real-section > summary').click()
+  await page.locator('.quick-video-branch > summary').click()
   await page.getByRole('button', { name: '0:03', exact: true }).click()
   await page.getByRole('dialog').getByRole('button', { name: '确认并开始' }).click()
   await expect(page).toHaveURL(/\/analysis$/)
@@ -63,6 +106,7 @@ test('video result becomes a base plan, resolves uncertainty, and restores from 
   await expect(page.locator('.plan-card')).toHaveCount(2)
 
   await page.locator('.plan-card').nth(1).locator('.action-summary').click()
+  await page.locator('[data-full-editor]').click()
   const secondConfirmationSheet = page.locator('.action-sheet')
   await secondConfirmationSheet.getByRole('button', { name: '确认并加入' }).click()
   await expect(secondConfirmationSheet).toBeHidden()
@@ -84,6 +128,7 @@ test('video result becomes a base plan, resolves uncertainty, and restores from 
     [2, '1'],
   ] as const) {
     await page.locator('.plan-card').nth(index).locator('.action-summary').click()
+    await page.locator('[data-full-editor]').click()
     const sheet = page.locator('.action-sheet')
     await sheet.getByRole('spinbutton').nth(0).fill('1')
     await sheet.getByRole('spinbutton').nth(1).fill(target)
@@ -97,23 +142,26 @@ test('video result becomes a base plan, resolves uncertainty, and restores from 
   await expect(page.getByRole('heading', { name: '拖拽弯举' })).toBeVisible()
   await expect(page.locator('.media-stage video')).toBeVisible()
 
-  await page.getByRole('button', { name: '开始本组' }).click()
+  await page.getByRole('button', { name: '准备好了' }).click()
   await expect(page.getByText('本组进行中', { exact: true }).first()).toBeVisible()
   await page.reload()
   await expect(page.getByText(/已恢复并暂停|训练已暂停/, { exact: true }).first()).toBeVisible()
   await page.getByRole('button', { name: '继续训练' }).click()
   await page.getByRole('button', { name: '完成本组' }).click()
 
-  await expect(page.getByText('准备继续', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('下一个动作', { exact: true }).first()).toBeVisible()
   await page.getByRole('button', { name: '准备好了' }).click()
   await expect(page.getByRole('heading', { name: '拖拽弯举' })).toBeVisible()
   await expect(page.locator('.media-stage video')).toBeVisible()
   await page.getByRole('button', { name: '完成本组' }).click()
 
-  await expect(page.getByText('准备继续', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('下一个动作', { exact: true }).first()).toBeVisible()
   await page.getByRole('button', { name: '准备好了' }).click()
   await expect(page.getByRole('heading', { name: '平板支撑' })).toBeVisible()
   await expect(page.getByText('这个动作没有参考视频')).toBeVisible()
-  await expect(page.getByRole('heading', { name: '训练完成' })).toBeVisible({ timeout: 5_000 })
+  await expect(page.getByRole('heading', { name: '训练完成' })).toBeVisible({ timeout: 7_000 })
   await expect(page.getByText(/实际完成量已保存到本机/)).toBeVisible()
+  await page.goto('/train')
+  await expect(page.locator('.saved-row')).toHaveCount(1)
+  await expect(page.locator('.saved-row')).toContainText('3 个动作')
 })

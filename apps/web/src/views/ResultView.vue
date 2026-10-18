@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import type { ActionFeedback } from '@/personalization/feedback'
+import { UserMessageError, userMessage } from '@/domain/user-message'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import CoachMotion from '@/features/experience/CoachMotion.vue'
@@ -19,8 +21,28 @@ const draft = useDraftStore()
 const training = useTrainingStore()
 const pending = ref(false)
 const feedback = ref('')
+const desktopQuery = typeof window.matchMedia === 'function'
+  ? window.matchMedia('(min-width: 1024px)') : null
+const detailsDefaultOpen = ref(desktopQuery?.matches ?? false)
+const updateDetailsDefault = (event: MediaQueryListEvent): void => {
+  detailsDefaultOpen.value = event.matches
+}
+onMounted(() => desktopQuery?.addEventListener('change', updateDetailsDefault))
+onBeforeUnmount(() => desktopQuery?.removeEventListener('change', updateDetailsDefault))
 const recordId = computed(() => String(route.params.recordId ?? ''))
 const record = computed(() => library.records.find((entry) => entry.id === recordId.value) ?? null)
+const feedbackPending = ref(false)
+const feedbackValue = (itemId: string) => library.actionFeedback.find(entry => entry.recordId === recordId.value && entry.itemId === itemId)?.value
+const feedbackOptions = { too_hard: '太累', just_right: '合适', too_easy: '太轻' } as const
+const saveActionFeedback = async (itemId: string, value: ActionFeedback['value'] | null): Promise<void> => {
+  if (feedbackPending.value) return
+  feedbackPending.value = true
+  try { await library.saveActionFeedback(recordId.value, itemId, value); feedback.value = value ? '已保存这项动作的感受' : '已清除这项反馈' }
+  catch { feedback.value = '动作反馈未保存成功，请重试' }
+  finally { feedbackPending.value = false }
+}
+const completedSets = computed(() => record.value?.actions.reduce((sum, action) => sum + action.completedSets, 0) ?? 0)
+const targetSets = computed(() => record.value?.actions.reduce((sum, action) => sum + action.targetSets, 0) ?? 0)
 const canCreatePoster = computed(() => record.value?.outcome === 'completed')
 const primaryActionLabel = computed(() => training.hasCurrent ? '继续当前训练' : '再练一次')
 const resultDateLabel = computed(() => {
@@ -54,7 +76,7 @@ const formatDuration = (seconds: number): string => {
 
 const posterBlob = async (): Promise<Blob> => {
   const current = record.value
-  if (!current) throw new Error('训练记录不存在')
+  if (!current) throw new UserMessageError('训练记录不存在')
   return renderCompletionPoster({
     outcome: current.outcome,
     planName: current.plan.name,
@@ -73,7 +95,7 @@ const sharePoster = async (): Promise<void> => {
     const result = await deliverCompletionPoster(await posterBlob(), record.value.plan.name)
     feedback.value = result === 'shared' ? '已打开分享' : result === 'downloaded' ? '海报已下载' : '已取消分享'
   } catch (error) {
-    feedback.value = error instanceof Error ? error.message : '海报生成失败，请重试'
+    feedback.value = userMessage(error, '海报生成失败，请重试')
   } finally {
     pending.value = false
   }
@@ -87,7 +109,7 @@ const downloadPoster = async (): Promise<void> => {
     downloadCompletionPoster(await posterBlob(), record.value.plan.name)
     feedback.value = '海报已下载'
   } catch (error) {
-    feedback.value = error instanceof Error ? error.message : '海报生成失败，请重试'
+    feedback.value = userMessage(error, '海报生成失败，请重试')
   } finally {
     pending.value = false
   }
@@ -115,6 +137,7 @@ const trainAgain = async (): Promise<void> => {
   pending.value = true
   feedback.value = ''
   try {
+    await draft.flushPersist()
     await draft.quiescePersistence()
     draft.adoptPersistedPlan(await library.replaceCurrentDraft({
       name: current.plan.name,
@@ -146,10 +169,9 @@ onMounted(async () => {
     </header>
 
     <section v-if="record" class="result-card" :class="{ completed: record.outcome === 'completed' }">
-      <div class="journal-tape" aria-hidden="true"></div>
       <div class="result-hero">
         <div>
-          <p class="eyebrow">TrainPal · {{ record.outcome === 'completed' ? 'DONE' : 'SAVED' }}</p>
+          <p class="eyebrow">TrainPal · 训练记录</p>
           <h1>{{ record.outcome === 'completed' ? '练完啦' : '今天先到这里' }}</h1>
           <h2>{{ record.plan.name }}</h2>
         </div>
@@ -175,14 +197,24 @@ onMounted(async () => {
         <span><b>{{ record.completedActionCount }}</b>完成动作</span>
       </div>
 
-      <details class="action-results">
+      <p class="result-set-summary" aria-label="实际完成组数">已完成 {{ completedSets }} / {{ targetSets }} 组</p>
+
+      <details class="action-results" :open="detailsDefaultOpen">
         <summary>
           <span>本次完成内容</span>
           <small>{{ record.actions.length }} 个动作 · 查看明细</small>
         </summary>
         <div v-for="action in record.actions" :key="action.itemId" class="action-result-row">
-          <span><strong>{{ action.name }}</strong><small>{{ action.completedSets }} / {{ action.targetSets }} 组</small></span>
+          <span>
+            <strong>{{ action.name }}</strong><small>{{ action.completedSets }} / {{ action.targetSets }} 组</small>
+            <small v-if="action.completedReps !== null">已完成组累计 {{ action.completedReps }} 次</small>
+            <small v-else-if="action.completedDurationSeconds !== null">已完成组累计 {{ action.completedDurationSeconds }} 秒</small>
+          </span>
           <b>{{ action.status === 'completed' ? '完成' : action.status === 'partial' ? '部分完成' : '已跳过' }}</b>
+          <details v-if="record.plan.sourcePlanId && action.completedSets > 0" class="action-feedback">
+            <summary>这项动作感觉如何{{ feedbackValue(action.itemId) ? ` · ${feedbackOptions[feedbackValue(action.itemId)!]}` : '' }}</summary>
+            <div><button v-for="(label, value) in feedbackOptions" :key="value" type="button" :aria-pressed="feedbackValue(action.itemId) === value" :disabled="feedbackPending" @click="saveActionFeedback(action.itemId, value)">{{ label }}</button><button v-if="feedbackValue(action.itemId)" type="button" :disabled="feedbackPending" @click="saveActionFeedback(action.itemId, null)">清除</button></div>
+          </details>
         </div>
       </details>
 
@@ -194,6 +226,7 @@ onMounted(async () => {
       <p v-if="feedback" class="feedback" role="status">{{ feedback }}</p>
 
       <footer>
+        <p v-if="!training.hasCurrent" class="replay-note">按这次记录里的训练安排返回方案，先查看或调整，再开始。</p>
         <button type="button" :disabled="pending" @click="trainAgain">{{ primaryActionLabel }}</button>
         <RouterLink to="/">继续找动作</RouterLink>
       </footer>
@@ -208,8 +241,14 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.action-result-row { flex-wrap: wrap; }
+.action-feedback { flex-basis: 100%; width: 100%; font-size: 14px; color: var(--tp-muted); }
+.action-feedback summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
+.action-feedback > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.action-feedback button { min-height: 44px; padding: 0 16px; border: 1px solid var(--tp-line); border-radius: 10px; color: var(--tp-ink); background: var(--tp-surface); }
+.action-feedback button[aria-pressed="true"] { border-color: var(--tp-primary-readable); background: var(--tp-surface-raised); }
 .result-page {
-  width: min(100%, 760px);
+  width: min(100%, 1120px);
   min-height: 100dvh;
   margin: auto;
   padding:
@@ -217,9 +256,7 @@ onMounted(async () => {
     clamp(16px, 4vw, 28px)
     max(34px, env(safe-area-inset-bottom));
   color: var(--tp-ink);
-  background:
-    radial-gradient(circle at 90% 2%, rgb(165 186 99 / 22%), transparent 21rem),
-    transparent;
+  background: transparent;
 }
 .result-header,
 .result-metrics,
@@ -228,23 +265,23 @@ onMounted(async () => {
 .result-header { justify-content: space-between; }
 .result-header a { display: inline-grid; min-height: 44px; place-items: center; color: var(--tp-ink); font-size: 12px; font-weight: 800; text-decoration: none; }
 .result-header span { color: var(--tp-muted); font-size: 11px; }
-.result-card { position: relative; margin-top: 20px; padding: clamp(22px, 6vw, 42px); border: 1px solid var(--tp-line); border-radius: 6px 30px 30px 30px; background: var(--tp-surface); box-shadow: var(--tp-shadow-soft); }
-.result-card::before { position: absolute; inset: 8px; border: 1px solid rgb(28 40 34 / 5%); border-radius: 4px 23px 23px 23px; content: ''; pointer-events: none; }
-.journal-tape { position: absolute; top: -11px; left: clamp(26px, 10vw, 72px); width: 92px; height: 24px; background: rgb(165 186 99 / 50%); box-shadow: 0 3px 8px rgb(28 40 34 / 8%); rotate: -2deg; }
+.result-card { position: relative; margin-top: 20px; padding: clamp(22px, 6vw, 42px); border: 1px solid var(--tp-line); border-radius: 14px; background: var(--tp-surface); box-shadow: var(--tp-shadow-soft); }
 .result-hero { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .eyebrow { margin: 0; color: var(--tp-primary-readable); font: 700 11px/1 var(--font-display), var(--font-cn); letter-spacing: .14em; }
-.result-card h1 { margin: 12px 0 6px; color: var(--tp-ink); font: 700 clamp(52px, 16vw, 86px)/.84 var(--font-display), var(--font-cn); letter-spacing: -.03em; }
+.result-card h1 { margin: 12px 0 6px; color: var(--tp-ink); font: 700 clamp(32px, 8vw, 44px)/1.3 var(--font-display), var(--font-cn); letter-spacing: -.03em; }
 .result-card h2 { margin: 0; color: var(--tp-muted); font-size: 14px; font-weight: 700; }
-.outcome-stamp { flex: 0 0 auto; padding: 10px 8px; border: 2px solid var(--tp-primary); border-radius: 50%; color: var(--tp-primary-readable); font-size: 11px; font-weight: 900; letter-spacing: .08em; rotate: 6deg; }
+.outcome-stamp { flex: 0 0 auto; padding: 10px 8px; border: 1px solid var(--tp-line); border-radius: 8px; color: var(--tp-primary-readable); font-size: 11px; font-weight: 900; letter-spacing: .08em; }
 .result-card.completed .outcome-stamp { border-color: var(--tp-success); color: var(--tp-success); }
-.coach-result { position: relative; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 14px; margin: 24px 0 12px; padding: 14px 16px; border: 1px solid rgb(165 186 99 / 45%); border-radius: 22px; background: rgb(165 186 99 / 12%); }
+.coach-result { position: relative; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 14px; margin: 24px 0 12px; padding: 14px 16px; border: 1px solid var(--tp-line); border-radius: 14px; background: var(--tp-surface-raised); }
 .coach-result :deep(.trainpal-coach__image) { width: clamp(72px, 22vw, 104px); filter: drop-shadow(0 9px 18px rgb(42 51 45 / 20%)); }
 .coach-result span { color: var(--tp-success); font: 700 11px/1 var(--font-display), var(--font-cn); letter-spacing: .12em; }
 .coach-result p { margin: 7px 0 0; color: var(--tp-ink); font-size: 13px; line-height: 1.6; }
-.result-metrics { position: relative; justify-content: space-between; gap: 8px; margin: 18px 0; padding: 18px 0; border-block: 1px dashed var(--tp-line); }
+.result-metrics { position: relative; justify-content: space-between; gap: 8px; margin: 18px 0; padding: 18px 0; border-block: 1px solid var(--tp-line); }
 .result-metrics span { flex: 1; color: var(--tp-muted); font-size: 11px; text-align: center; }
 .result-metrics b { display: block; margin-bottom: 5px; color: var(--tp-ink); font: 700 clamp(28px, 9vw, 40px)/.9 var(--font-display); }
 .action-results { position: relative; border-bottom: 1px solid var(--tp-line); }
+.result-set-summary { grid-column: 1; margin: 0; color: var(--tp-ink); font-size: 14px; font-variant-numeric: tabular-nums; }
+.replay-note { flex-basis: 100%; margin: 0 0 6px; color: var(--tp-muted); font-size: 12px; line-height: 1.6; text-align: center; }
 .action-results summary { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 12px; color: var(--tp-ink); font-size: 13px; font-weight: 800; cursor: pointer; list-style: none; }
 .action-results summary::-webkit-details-marker { display: none; }
 .action-results summary::after { content: '＋'; color: var(--tp-primary); font-size: 18px; }
@@ -256,14 +293,14 @@ onMounted(async () => {
 .action-result-row small { margin-top: 3px; color: var(--tp-muted); font-size: 11px; }
 .action-result-row > b { color: var(--tp-success); font-size: 11px; }
 .poster-actions { position: relative; gap: 8px; margin-top: 18px; }
-.poster-actions button { min-height: 48px; flex: 1; border: 1px solid var(--tp-line); border-radius: 999px; color: var(--tp-ink); background: var(--tp-surface); font-weight: 800; }
+.poster-actions button { min-height: 48px; flex: 1; border: 1px solid var(--tp-line); border-radius: 12px; color: var(--tp-ink); background: var(--tp-surface); font-weight: 800; }
 .poster-actions .secondary { color: var(--tp-muted); background: transparent; }
 .early-note,
 .feedback { position: relative; color: var(--tp-muted); font-size: 11px; text-align: center; }
 .early-note { margin: 18px 0 0; padding: 12px; border-radius: 14px; background: rgb(108 116 110 / 8%); line-height: 1.55; }
 .feedback { color: var(--tp-success); }
 .result-card footer { position: relative; flex-direction: column; justify-content: center; gap: 6px; margin-top: 22px; }
-.result-card footer button { display: inline-grid; width: 100%; min-height: 52px; padding: 0 20px; place-items: center; border: 1px solid var(--tp-primary); border-radius: 999px; color: var(--tp-surface); background: var(--tp-primary-readable); box-shadow: 0 12px 24px rgb(217 75 43 / 22%); font-weight: 900; }
+.result-card footer button { display: inline-grid; width: 100%; min-height: 52px; padding: 0 20px; place-items: center; border: 1px solid var(--tp-primary); border-radius: 12px; color: var(--tp-on-primary); background: var(--tp-primary); box-shadow: var(--tp-shadow-soft); font-weight: 900; }
 .result-card footer a { display: inline-grid; min-width: 44px; min-height: 44px; padding: 0 6px; place-items: center; color: var(--tp-muted); font-size: 11px; font-weight: 700; text-decoration: none; }
 .result-card footer button:disabled { opacity: .5; }
 .missing-result { margin-top: 20vh; padding: 28px; border: 1px solid var(--tp-line); border-radius: 28px; background: var(--tp-surface); text-align: center; box-shadow: var(--tp-shadow-soft); }
@@ -277,5 +314,15 @@ onMounted(async () => {
   .result-metrics { gap: 3px; }
   .result-metrics b { font-size: 26px; }
   .coach-result { grid-template-columns: 1fr; justify-items: center; text-align: center; }
+}
+@media (min-width: 1024px) {
+  .result-card { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 40px; }
+  .result-hero { grid-column: 1 / -1; margin-bottom: 8px; }
+  .coach-result { grid-column: 1; margin: 0; }
+  .result-metrics { grid-column: 1; margin: 0; }
+  .action-results { grid-column: 2; grid-row: 2 / span 3; align-self: start; }
+  .poster-actions, .early-note, .feedback { grid-column: 1; margin-top: 0; }
+  .result-card footer { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--tp-line); }
+  .result-card footer button { width: auto; min-width: 220px; }
 }
 </style>

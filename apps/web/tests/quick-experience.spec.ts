@@ -10,7 +10,7 @@ describe('quick experience plan', () => {
     let sequence = 0
     const items = createQuickExperienceDraftItems(() => `quick-${++sequence}`)
 
-    expect(QUICK_EXPERIENCE_LABEL).toBe('快速体验方案')
+    expect(QUICK_EXPERIENCE_LABEL).toBe('预设方案')
     expect(items).toHaveLength(3)
     expect(items.every((item) => item.sourceRef === null)).toBe(true)
     expect(items.flatMap((item) => [item.sets.source, item.reps.source, item.durationSeconds.source, item.restSeconds.source])).not.toContain('video')

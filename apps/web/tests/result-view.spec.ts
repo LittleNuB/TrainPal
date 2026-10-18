@@ -72,13 +72,14 @@ const makeSession = (record: TrainingRecord): TrainingSession => ({
   updatedAt: '2026-07-21T00:01:00.000Z',
 })
 
-const setup = async (options: { failReplacement?: boolean } = {}) => {
+const setup = async (options: { failReplacement?: boolean; failSave?: boolean } = {}) => {
   const pinia = createPinia()
   setActivePinia(pinia)
   const record = makeRecord()
   const replacementCalls: Array<Pick<DraftPlan, 'name' | 'items'>> = []
+  const savedDrafts: DraftPlan[] = []
   const repository: LibraryRepository = {
-    listPlans: async () => [],
+    listActionFeedback: async () => [],    saveActionFeedback: async () => { throw new Error('not used') },    removeActionFeedback: async () => {},    listPlans: async () => [],
     listRecords: async () => [record],
     loadProfile: async () => null,
     loadPreferences: async () => null,
@@ -101,7 +102,13 @@ const setup = async (options: { failReplacement?: boolean } = {}) => {
     clearAllLocalData: async () => undefined,
   }
   await useLibraryStore().load(repository)
-  await useDraftStore().load({ load: async () => undefined, save: async () => undefined })
+  await useDraftStore().load({
+    load: async () => undefined,
+    save: async (plan) => {
+      if (options.failSave) throw new Error('storage details must not leak')
+      savedDrafts.push(structuredClone(plan))
+    },
+  })
 
   const router = createRouter({
     history: createMemoryHistory(),
@@ -117,11 +124,29 @@ const setup = async (options: { failReplacement?: boolean } = {}) => {
   await router.isReady()
   const wrapper = mount(ResultView, { global: { plugins: [pinia, router] } })
   await flushPromises()
-  return { record, replacementCalls, router, wrapper }
+  return { record, replacementCalls, savedDrafts, router, wrapper }
 }
 
 describe('训练结果', () => {
   afterEach(() => vi.restoreAllMocks())
+
+  it('separates actual completed sets from the full arrangement used for repractice', async () => {
+    const { record, wrapper } = await setup()
+    record.outcome = 'ended_early'
+    record.actions = [
+      { itemId: 'one', name: '合成次数动作', targetSets: 2, completedSets: 1, completedReps: 3,
+        completedDurationSeconds: null, activeSeconds: 4, status: 'partial' },
+      { itemId: 'two', name: '合成计时动作', targetSets: 1, completedSets: 0, completedReps: null,
+        completedDurationSeconds: 0, activeSeconds: 0, status: 'skipped' },
+    ]
+    useLibraryStore().records = [structuredClone(record)]
+    await flushPromises()
+    expect(wrapper.get('[aria-label="实际完成组数"]').text()).toBe('已完成 1 / 3 组')
+    expect(wrapper.get('.action-result-row').text()).toContain('已完成组累计 3 次')
+    expect(wrapper.text()).toContain('按这次记录里的训练安排返回方案，先查看或调整，再开始。')
+    expect(wrapper.find('.poster-actions').exists()).toBe(false)
+    expect(wrapper.get('footer button').text()).toBe('再练一次')
+  })
 
   it('presents one warm result summary before progressively disclosing action details', async () => {
     const context = await setup()
@@ -198,6 +223,33 @@ describe('训练结果', () => {
     expect(draft.plan.name).toBe(context.record.plan.name)
     expect(draft.items).toEqual(context.record.plan.items)
     expect(context.router.currentRoute.value.path).toBe('/plan')
+  })
+
+  it('saves pending edits before restoring a past training plan', async () => {
+    const context = await setup()
+    useDraftStore().addManualAction({ name: '必须保留的新动作', mode: 'reps' })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    await context.wrapper.get('footer button').trigger('click')
+    await flushPromises()
+
+    expect(context.savedDrafts.at(-1)?.items[0]?.name).toBe('必须保留的新动作')
+    expect(context.replacementCalls).toHaveLength(1)
+  })
+
+  it('does not replace the current plan when saving pending edits fails', async () => {
+    const context = await setup({ failSave: true })
+    useDraftStore().addManualAction({ name: '必须保留的新动作', mode: 'reps' })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    await context.wrapper.get('footer button').trigger('click')
+    await flushPromises()
+
+    expect(context.replacementCalls).toHaveLength(0)
+    expect(useDraftStore().items[0]?.name).toBe('必须保留的新动作')
+    expect(context.router.currentRoute.value.path).toBe('/result/record-1')
+    expect(context.wrapper.get('[role="status"]').text()).toContain('没有恢复成功')
+    expect(context.wrapper.text()).not.toContain('storage details')
   })
 
   it('keeps the user on the result and hides storage details when replacement fails', async () => {

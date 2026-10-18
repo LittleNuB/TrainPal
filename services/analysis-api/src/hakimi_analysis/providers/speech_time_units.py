@@ -44,18 +44,27 @@ def reconcile_speech_time_units(
             and signal.rest_seconds is None
             and not _REST_CONTEXT.search(text)
         ):
-            action = re.escape(signal.action_name)
             minute_statement = re.fullmatch(
                 rf"\s*(?:{_AFFIRMATIVE_PREFIX})(?P<value>[0-9]+)\s*分钟\s*"
-                rf"(?:的)?{action}[。.!！]?\s*",
+                r"(?:的)?(?P<action>.+?)[。.!！]?\s*",
                 text,
             )
             if (
                 minute_statement is not None
                 and signal.duration_seconds == int(minute_statement.group("value"))
             ):
-                signal = signal.model_copy(
-                    update={"duration_seconds": signal.duration_seconds * 60}
-                )
+                action = minute_statement.group("action")
+                minutes = minute_statement.group("value")
+                # The ASR supplies both the value and the exact action identity.
+                # A model-added duration label must agree; it is not evidence.
+                if signal.action_name in {
+                    action,
+                    f"{minutes}分钟{action}",
+                    f"{action}（{minutes}分钟）",
+                    f"{action}({minutes}分钟)",
+                }:
+                    signal = signal.model_copy(
+                        update={"duration_seconds": signal.duration_seconds * 60}
+                    )
         signals.append(signal)
     return result.model_copy(update={"signals": signals})

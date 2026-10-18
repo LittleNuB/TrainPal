@@ -466,7 +466,7 @@ onMounted(async () => {
     <p v-if="notice" class="flow-notice" role="alert">{{ notice }}</p>
 
     <section v-if="!initialized" class="flow-loading" aria-live="polite">
-      <p class="tp-kicker">GYMTI · LOCAL FIRST</p>
+      <p class="tp-kicker">GYMTI</p>
       <h1>正在翻到第一题</h1>
     </section>
 

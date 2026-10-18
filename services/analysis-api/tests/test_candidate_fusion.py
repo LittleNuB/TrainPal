@@ -123,7 +123,7 @@ def test_overlapping_different_actions_remain_separate_candidates() -> None:
     )
 
     assert len(candidates) == 2
-    assert [candidate.name for candidate in candidates] == ["Drag Curl", "锤式弯举"]
+    assert [candidate.name for candidate in candidates] == ["拖拽弯举", "锤式弯举"]
     assert all(candidate.needs_confirmation for candidate in candidates)
     assert all(len(candidate.evidence) == 1 for candidate in candidates)
 

@@ -38,7 +38,7 @@ export const useAccessStore = defineStore('access', () => {
       session.value = await client.getSession()
     } catch {
       session.value = null
-      errorMessage.value = '无法确认实时 AI 名额，可先使用快速体验方案'
+      errorMessage.value = '无法确认实时 AI 名额，可先查看预设方案'
     } finally {
       loaded.value = true
       pending.value = false

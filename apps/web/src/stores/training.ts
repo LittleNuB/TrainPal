@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
-import type { DraftPlan } from '@/domain/types'
+import type { DraftPlan, Segment } from '@/domain/types'
 import type { CoachStyleId } from '@/domain/coach'
 import type {
   PlanSnapshot,
@@ -9,6 +9,7 @@ import type {
   TrainingSession,
 } from '@/domain/training'
 import { QUICK_EXPERIENCE_PLAN_NAME } from '@/features/quick-experience/fixture'
+import { currentReminderCache, type ReminderPreferences } from '@/domain/reminders'
 import type {
   PlanValidationIssue,
   TrainingEngine,
@@ -60,7 +61,7 @@ export const useTrainingStore = defineStore('training', () => {
     }
 
     if (result.session) {
-      session.value = result.code === 'session_conflict' && result.session.status === 'active'
+      session.value = result.code === 'session_conflict' && ['active', 'countdown', 'resting'].includes(result.session.status)
         ? {
             ...result.session,
             status: 'paused',
@@ -71,7 +72,7 @@ export const useTrainingStore = defineStore('training', () => {
     }
     if (
       result.code === 'storage_unavailable'
-      && session.value?.status === 'active'
+      && session.value && ['active', 'countdown', 'resting'].includes(session.value.status)
     ) {
       session.value = {
         ...session.value,
@@ -119,22 +120,26 @@ export const useTrainingStore = defineStore('training', () => {
   async function createFromDraft(
     draft: DraftPlan,
     coachStyleId: CoachStyleId | null = null,
+    reminderPreferences?: ReminderPreferences,
   ): Promise<TrainingEngineResult> {
     return serialize(async () => {
       if (persistenceSuspended.value) return applyResult(unavailable())
       if (!engine) return applyResult(unavailable())
+      const frozenDraft = cloneJson(draft)
       const snapshot: PlanSnapshot = {
-        name: draft.name,
-        source: draft.linkedPlanId
+        name: frozenDraft.name,
+        source: frozenDraft.linkedPlanId
           ? 'saved'
-          : draft.name === QUICK_EXPERIENCE_PLAN_NAME ? 'sample' : 'draft',
-        sourcePlanId: draft.linkedPlanId,
-        items: cloneJson(draft.items),
+          : frozenDraft.name === QUICK_EXPERIENCE_PLAN_NAME ? 'sample' : 'draft',
+        sourcePlanId: frozenDraft.linkedPlanId,
+        items: frozenDraft.items.filter(item => item.confirmationStatus !== 'pending'),
+        reminderCache: await currentReminderCache(frozenDraft, reminderPreferences),
       }
       const result = await engine.dispatch({
         type: 'session.create',
         plan: snapshot,
         coachStyleId,
+        flowVersion: 'watch-v1',
       })
       return applyResult(result)
     })
@@ -176,6 +181,13 @@ export const useTrainingStore = defineStore('training', () => {
     expectedRevision: current.revision,
   }))
 
+  const prepareSet = () => runVersioned((current) => ({
+    type: 'set.prepare', sessionId: current.sessionId, expectedRevision: current.revision,
+  }))
+
+  const selectPlayback = (input: { sessionId: string; expectedRevision: number; itemId: string; fingerprint: string; range: Segment | null }) =>
+    runVersioned(() => ({ type: 'playback.select', ...input }))
+
   const tick = () => runVersioned((current) => ({
     type: 'clock.tick',
     sessionId: current.sessionId,
@@ -188,6 +200,16 @@ export const useTrainingStore = defineStore('training', () => {
     sessionId: current.sessionId,
     expectedRevision: current.revision,
   }))
+
+  // Inspect state only after earlier commands settle: a pending preparation or
+  // resume may still look paused at the moment the page becomes hidden.
+  const pauseForLeave = () => serialize(async () => {
+    const current = session.value
+    if (!engine || !current || persistenceSuspended.value || commandLocked.value
+      || !['active', 'countdown', 'resting'].includes(current.status)) return
+    applyResult(await engine.dispatch({ type: 'session.pause', reason: 'page_hidden',
+      sessionId: current.sessionId, expectedRevision: current.revision }))
+  })
 
   const completeSet = () => runVersioned((current) => ({
     type: 'set.complete',
@@ -250,8 +272,11 @@ export const useTrainingStore = defineStore('training', () => {
     restore,
     createFromDraft,
     startSet,
+    prepareSet,
+    selectPlayback,
     tick,
     pause,
+    pauseForLeave,
     completeSet,
     continueRest,
     skipAction,

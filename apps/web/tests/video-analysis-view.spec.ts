@@ -132,8 +132,8 @@ describe('视频动作分析页', () => {
 
     expect(wrapper.get('h1').text()).toBe('来源视频 A')
     expect(wrapper.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('40')
-    expect(wrapper.get('.discovery-count strong').text()).toBe('2')
-    expect(wrapper.get('.discovery-count span').text()).toBe('个动作线索')
+    expect(wrapper.get('.discovery-count summary').text()).toBe('已发现 2 个动作线索')
+    expect(wrapper.get('.discovery-count').attributes('open')).toBeUndefined()
     expect(wrapper.find('input[type="file"]').exists()).toBe(false)
     expect(wrapper.find('select').exists()).toBe(false)
     expect(wrapper.find('.candidate-panel').exists()).toBe(false)
@@ -179,7 +179,7 @@ describe('视频动作分析页', () => {
     await flushPromises()
     expect(draft.items.map((item) => item.name)).toEqual(['已有动作'])
     expect(document.activeElement).toBe(wrapper.get('.append-option').element)
-    expect(wrapper.get('.proposal-dialog').text()).toContain('不会静默覆盖')
+    expect(wrapper.get('.proposal-dialog').text()).toContain('要加入当前方案，还是替换它')
 
     await wrapper.get('.append-option').trigger('click')
     await flushPromises()
@@ -254,7 +254,7 @@ describe('视频动作分析页', () => {
 
     analysis.coverageStatus = 'insufficient'
     await flushPromises()
-    expect(wrapper.text()).toContain('可靠覆盖还不够生成方案')
+    expect(wrapper.text()).toContain('还有内容未识别，暂时无法生成方案')
     expect(wrapper.text()).toContain('补齐可靠证据后')
     expect(wrapper.find('.prepared-plan-action').exists()).toBe(false)
     expect(wrapper.get('.coverage-gaps button').text()).toBe('重试这段')
@@ -266,7 +266,7 @@ describe('视频动作分析页', () => {
     prepareControlledAnalysis(analysis)
     analysis.candidates = []
     await flushPromises()
-    expect(wrapper.text()).toContain('没有足够可靠的动作证据')
+    expect(wrapper.text()).toContain('暂时没能识别出明确的训练动作')
     expect(wrapper.text()).not.toContain('这次没有分析成功')
 
     analysis.status = 'failed'

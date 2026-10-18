@@ -10,9 +10,8 @@ export const SUPPORTED_LOCAL_MEDIA_TYPES = [
   'video/webm',
 ] as const
 
-// CloudBase rejects the complete HTTP request at 20 MB. Keep one megabyte of
-// headroom for multipart metadata even though the application itself accepts
-// files up to the larger limit advertised by /capabilities.
+// Only CloudBase builds set this transport envelope; local servers use their
+// advertised capability. Never silently apply a historical host limit locally.
 export const CLOUDBASE_DEMO_UPLOAD_MAX_BYTES = 19_000_000
 
 export type LocalMediaValidation =
@@ -39,10 +38,12 @@ const formatSizeLimit = (bytes: number): string => {
 
 export const effectiveLocalUploadMaxBytes = (
   capabilities: AnalysisCapabilities,
-): number => Math.min(
-  capabilities.local_upload_max_bytes,
-  CLOUDBASE_DEMO_UPLOAD_MAX_BYTES,
-)
+): number => {
+  const configured = Number(import.meta.env.VITE_UPLOAD_MAX_BYTES)
+  const transportLimit = Number.isSafeInteger(configured) && configured > 0
+    ? configured : capabilities.local_upload_max_bytes
+  return Math.min(capabilities.local_upload_max_bytes, transportLimit)
+}
 
 export const validateLocalMediaUpload = (
   file: File,
@@ -60,14 +61,15 @@ export const validateLocalMediaUpload = (
   }
   if (file.size > effectiveLocalUploadMaxBytes(capabilities)) {
     const platformEnvelopeIsLimiting = (
-      capabilities.local_upload_max_bytes > CLOUDBASE_DEMO_UPLOAD_MAX_BYTES
+      effectiveLocalUploadMaxBytes(capabilities) === CLOUDBASE_DEMO_UPLOAD_MAX_BYTES
+      && capabilities.local_upload_max_bytes > CLOUDBASE_DEMO_UPLOAD_MAX_BYTES
     )
     return {
       ok: false,
       code: 'too_large',
       message: platformEnvelopeIsLimiting
         ? 'CloudBase 演示入口限制 20 MB；请先压缩视频再上传'
-        : `当前环境支持不超过 ${formatSizeLimit(capabilities.local_upload_max_bytes)} 的视频`,
+        : `当前环境支持不超过 ${formatSizeLimit(effectiveLocalUploadMaxBytes(capabilities))} 的视频`,
     }
   }
   return { ok: true }

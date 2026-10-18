@@ -1,4 +1,5 @@
 import Dexie, { type Table, type Transaction } from 'dexie'
+import type { ActionFeedback } from '@/personalization/feedback'
 
 import type { DraftPlan, LocalMediaRecord } from '@/domain/types'
 import type {
@@ -15,6 +16,7 @@ import type {
 } from '@/domain/training'
 
 export class HachimiDatabase extends Dexie {
+  actionFeedback!: Table<ActionFeedback, string>
   drafts!: Table<DraftPlan, string>
   plans!: Table<SavedPlan, string>
   sessions!: Table<TrainingSession, string>
@@ -89,6 +91,12 @@ export class HachimiDatabase extends Dexie {
       gymtiPendingResults: '&id, resultId, updatedAt',
       gymtiResults: '&id, resultId, updatedAt',
     })
+    this.version(6).stores({ actionFeedback: '&id, recordId, planId, recordedAt' })
+      .upgrade(async (transaction: Transaction) => {
+        await transaction.table('profiles').toCollection().modify((profile: TrainingProfile) => {
+          profile.trainingExperience ??= null
+        })
+      })
   }
 }
 

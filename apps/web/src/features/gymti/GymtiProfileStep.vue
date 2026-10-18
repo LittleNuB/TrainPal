@@ -52,7 +52,7 @@ const save = (): void => emit('save', {
 <template>
   <section class="profile-step">
     <div class="profile-intro">
-      <p class="tp-kicker">OPTIONAL PROFILE</p>
+      <p class="tp-kicker">训练档案 · 可选</p>
       <h1 class="tp-title">完善训练档案</h1>
       <p>可跳过，不影响测评结果</p>
     </div>
@@ -114,7 +114,7 @@ const save = (): void => emit('save', {
       </div>
 
       <p class="privacy-note">
-        这些信息只保存在当前设备，主要用于训练消耗约值；不会发送给 GYMTI 或结果解释模型。
+        这些信息仅保存在此设备，用于估算训练消耗。
       </p>
       <button
         v-if="hasExistingProfile"
@@ -164,8 +164,8 @@ const save = (): void => emit('save', {
 .profile-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .profile-grid label { display: grid; gap: 7px; color: var(--tp-muted); font-size: 12px; font-weight: 700; }
 .profile-grid input,
-.profile-grid select { min-width: 0; min-height: 48px; padding: 10px 12px; border: 1px solid var(--tp-line); border-radius: 13px; color: var(--tp-ink); background: #F8F4EB; font: inherit; }
-.privacy-note { margin: 0; padding: 13px; border-left: 3px solid var(--tp-secondary); border-radius: 0 12px 12px 0; color: var(--tp-muted); background: rgb(165 186 99 / 10%); font-size: 11px; line-height: 1.65; }
+.profile-grid select { min-width: 0; min-height: 48px; padding: 10px 12px; border: 1px solid var(--tp-line); border-radius: 13px; color: var(--tp-ink); background: var(--tp-surface-raised); font: inherit; }
+.privacy-note { margin: 0; padding: 13px; border-left: 3px solid var(--tp-secondary); border-radius: 0 12px 12px 0; color: var(--tp-muted); background: rgb(25 205 192 / 10%); font-size: 11px; line-height: 1.65; }
 .clear-profile { width: fit-content; min-height: 44px; padding: 0; border: 0; color: var(--tp-muted); background: transparent; font-size: 12px; text-decoration: underline; text-underline-offset: 4px; }
 .save-failure { display: grid; gap: 5px; padding: 13px; border: 1px solid rgb(179 38 30 / 24%); border-radius: 13px; color: var(--tp-danger); background: rgb(179 38 30 / 5%); }
 .save-failure strong { font-size: 13px; }
@@ -173,9 +173,10 @@ const save = (): void => emit('save', {
 .profile-actions { position: fixed; right: max(14px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); left: max(14px, env(safe-area-inset-left)); z-index: 20; display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.4fr); max-width: 732px; gap: 10px; margin: auto; padding: 10px; border: 1px solid rgb(28 40 34 / 12%); border-radius: 20px; background: var(--tp-surface); box-shadow: var(--tp-shadow-float); }
 .profile-actions button { min-height: 48px; border-radius: 999px; font-weight: 800; }
 .secondary-action { border: 1px solid var(--tp-line); color: var(--tp-ink); background: transparent; }
-.primary-action { border: 1px solid var(--tp-primary); color: #FFFDF8; background: var(--tp-primary-readable); }
+.primary-action { border: 1px solid var(--tp-primary); color: var(--tp-on-primary); background: var(--tp-primary); }
 
 @media (min-width: 360px) {
   .profile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+@media (min-width: 1024px) { .profile-actions { left: calc(var(--tp-sidebar-width, 216px) + 24px); } }
 </style>

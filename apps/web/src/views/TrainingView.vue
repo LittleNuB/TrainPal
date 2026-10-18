@@ -14,6 +14,10 @@ import type { CoachMotionCue, CoachMotionEvent } from '@/domain/coach'
 import { fingerprintMatches, probeVideoDuration, SUPPORTED_LOCAL_MEDIA_TYPES } from '@/domain/local-media'
 import { toSafeOriginUrl } from '@/domain/source'
 import CoachMotion from '@/features/experience/CoachMotion.vue'
+import SourceTips from '@/features/experience/SourceTips.vue'
+import { useTrainingReminders } from '@/features/experience/use-training-reminders'
+import PlaybackControls from '@/features/experience/PlaybackControls.vue'
+import { currentPlaybackRange } from '@/domain/playback'
 import { derivePetState } from '@/features/experience/pet-state'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useLibraryStore } from '@/stores/library'
@@ -34,14 +38,28 @@ const localMediaResolving = ref(false)
 const localMediaError = ref('')
 const screenReaderAnnouncement = ref('')
 const coachCue = ref<CoachMotionCue | null>(null)
+const soundEnabled = ref(true)
+const playbackBusy = ref(false)
+const handsfreeEnabled = ref(false)
+const reminderPreferenceError = ref('')
+let cueAudio: AudioContext | null = null
+let unduckTimer: ReturnType<typeof setTimeout> | null = null
+let originalVolume: number | null = null
+let duckedVideo: HTMLVideoElement | null = null
+const countdownDucking = ref(false)
 let ticker: ReturnType<typeof setInterval> | null = null
-let pausePending = false
+let viewMounted = false
+let leavePause: Promise<void> | null = null
 let cueSequence = 0
 let countdownRestKey: string | null = null
 
 const session = computed(() => training.session)
 const item = computed(() => training.currentItem)
 const progress = computed(() => training.currentProgress)
+const reminders = useTrainingReminders({ session,
+  preferences: computed(() => library.preferences.speechReminders), soundEnabled,
+  blocked: computed(() => playbackBusy.value || handsfreeEnabled.value || training.commandLocked),
+})
 const source = computed(() => {
   const sourceId = item.value?.sourceRef?.sourceId
   return sourceId ? analysis.sources.find((entry) => entry.id === sourceId) ?? null : null
@@ -54,7 +72,7 @@ const isLocalSource = computed(() => Boolean(
   ),
 ))
 const mediaUrl = computed(() => isLocalSource.value ? localMediaUrl.value : source.value?.media_url ?? null)
-const segment = computed(() => item.value?.segment.value ?? null)
+const segment = computed(() => item.value ? currentPlaybackRange(item.value) : null)
 const hasPlayableVideo = computed(() => Boolean(
   item.value?.sourceRef && mediaUrl.value && segment.value && !mediaLoadFailed.value,
 ))
@@ -65,6 +83,22 @@ const mediaBadge = computed(() => {
 })
 const originalUrl = computed(() => toSafeOriginUrl(item.value?.sourceRef?.originUrl))
 const targetSets = computed(() => item.value?.sets.value ?? 0)
+const totalSets = computed(() => session.value?.plan.items.reduce((sum, action) => sum + (action.sets.value ?? 0), 0) ?? 0)
+const completedSets = computed(() => session.value?.progress.reduce((sum, action) => sum + action.completedSets, 0) ?? 0)
+const upcomingSet = computed(() => {
+  const current = session.value
+  if (!current || !item.value) return null
+  let index = current.currentItemIndex
+  let set = current.currentSetIndex + 1
+  if (current.status === 'active' || current.status === 'countdown') {
+    if (set < targetSets.value) set += 1
+    else { index += 1; set = 1 }
+  }
+  const action = current.plan.items[index]
+  if (!action) return null
+  const target = action.mode === 'reps' ? `${action.reps.value} 次` : `${action.durationSeconds.value} 秒`
+  return `${action.name} · 第 ${set} / ${action.sets.value} 组 · ${target}`
+})
 const actionPosition = computed(() => {
   if (!session.value) return ''
   return `动作 ${session.value.currentItemIndex + 1} / ${session.value.plan.items.length}`
@@ -74,11 +108,15 @@ const setNumber = computed(() => Math.min(
   targetSets.value,
 ))
 const restRemainingSeconds = computed(() => {
+  if (session.value?.status === 'paused') return session.value.pausedRestSeconds ?? 0
   if (session.value?.status !== 'resting' || !session.value.restEndsAt) return 0
-  return Math.max(0, Math.ceil(
+  return Math.min(session.value.scheduledRestSeconds ?? Infinity, Math.max(0, Math.ceil(
     (Date.parse(session.value.restEndsAt) - nowMilliseconds.value) / 1_000,
-  ))
+  )))
 })
+const isPausedRest = computed(() => session.value?.status === 'paused' && restRemainingSeconds.value > 0)
+const countdownSeconds = computed(() => session.value?.status === 'countdown'
+  ? Math.min(3, Math.max(0, Math.ceil((Date.parse(session.value.countdownEndsAt ?? '') - nowMilliseconds.value) / 1_000))) : 0)
 const durationRemainingSeconds = computed(() => {
   if (item.value?.mode !== 'duration') return 0
   const target = item.value.durationSeconds.value ?? 0
@@ -87,8 +125,10 @@ const durationRemainingSeconds = computed(() => {
 })
 const statusLabel = computed(() => {
   if (!session.value) return '没有未完成训练'
+  if (session.value.status === 'countdown') return '准备开始'
   if (session.value.status === 'active') return item.value?.mode === 'duration' ? '倒计时进行中' : '本组进行中'
   if (session.value.status === 'resting') return '组间休息'
+  if (isPausedRest.value) return '休息已暂停'
   if (session.value.status === 'ready_to_continue') return '准备继续'
   if (session.value.pauseReason === 'before_start') return '准备开始'
   if (session.value.pauseReason === 'between_actions') return '下一个动作'
@@ -96,12 +136,13 @@ const statusLabel = computed(() => {
   return '训练已暂停'
 })
 const startActionLabel = computed(() => {
+  if (isPausedRest.value) return '继续休息'
   if (session.value?.status === 'ready_to_continue') return '准备好了'
   if (
     session.value?.status === 'paused'
     && (session.value.pauseReason === 'before_start' || session.value.pauseReason === 'between_actions')
   ) {
-    return '开始本组'
+    return session.value.flowVersion === 'watch-v1' ? '准备好了' : '开始本组'
   }
   return '继续训练'
 })
@@ -116,12 +157,21 @@ watch(
   },
 )
 const isRestFocus = computed(() => (
-  session.value?.status === 'resting' || session.value?.status === 'ready_to_continue'
+  session.value?.status === 'resting' || session.value?.status === 'ready_to_continue' || isPausedRest.value
 ))
 const coachMessage = computed(() => {
   if (!session.value) return ''
-  if (session.value.status === 'resting') return '先放松呼吸。倒计时结束后，由你决定什么时候继续。'
-  if (session.value.status === 'ready_to_continue') return '休息结束了。确认准备好，再开始下一组。'
+  if (isPausedRest.value) return '休息已暂停。继续后先走完剩余休息。'
+  if (session.value.status === 'resting') {
+    if (session.value.flowVersion !== 'watch-v1' || session.value.autoAdvanceSuspended) {
+      return '先放松呼吸。休息结束后等你确认，不会自动开始。'
+    }
+    return session.value.currentSetIndex > 0
+      ? '休息结束后自动倒数 3 秒，开始下一组。'
+      : '接下来换动作。休息结束后，点“准备好了”再开始。'
+  }
+  if (session.value.status === 'countdown') return '调整好姿势，马上开始。'
+  if (session.value.status === 'ready_to_continue') return '休息结束了。确认准备好，再开始。'
   if (session.value.status === 'active') return 'TrainPal 会替你记住进度，你只需要专注完成这一组。'
   if (session.value.pauseReason === 'recovered') return '训练进度已经找回，准备好再继续。'
   if (session.value.pauseReason === 'between_actions') return '上一个动作已记下，准备好再进入下一项。'
@@ -183,7 +233,12 @@ const syncVideo = async (): Promise<void> => {
   const element = video.value
   const range = segment.value
   if (!element || !range) return
-  if (element.ended) {
+  if (document.hidden || leavePause) { element.pause(); return }
+  if (playbackBusy.value) return
+  const looping = session.value?.flowVersion === 'watch-v1' && session.value.status === 'active'
+  if (looping && (element.ended || element.currentTime >= range.end_seconds)) {
+    element.currentTime = range.start_seconds
+  } else if (element.ended) {
     element.pause()
     return
   }
@@ -210,7 +265,14 @@ const keepVideoInSegment = (): void => {
   const element = video.value
   const range = segment.value
   if (!element || !range) return
+  if (document.hidden || leavePause) { element.pause(); return }
+  if (playbackBusy.value) return
   if (element.currentTime >= range.end_seconds) {
+    if (session.value?.flowVersion === 'watch-v1' && session.value.status === 'active' && !training.commandLocked) {
+      element.currentTime = range.start_seconds
+      void element.play().catch(() => undefined)
+      return
+    }
     element.currentTime = range.end_seconds
     element.pause()
     return
@@ -224,7 +286,73 @@ const keepVideoInSegment = (): void => {
 const finishVideoSegment = (): void => {
   const element = video.value
   if (!element) return
-  element.pause()
+  if (document.hidden || leavePause) { element.pause(); return }
+  if (session.value?.flowVersion === 'watch-v1' && session.value.status === 'active' && segment.value && !training.commandLocked) {
+    element.currentTime = segment.value.start_seconds
+    void element.play().catch(() => undefined)
+  } else element.pause()
+}
+
+const restoreVideoVolume = (): void => {
+  if (unduckTimer) clearTimeout(unduckTimer)
+  unduckTimer = null
+  countdownDucking.value = false
+  if (duckedVideo && originalVolume !== null) duckedVideo.volume = originalVolume
+  originalVolume = null
+  duckedVideo = null
+}
+
+const updateVideoDucking = (): void => {
+  const wanted = soundEnabled.value && !document.hidden
+    && (countdownDucking.value || reminders.speaking.value)
+  if (duckedVideo && (duckedVideo !== video.value || !wanted)) {
+    if (originalVolume !== null) duckedVideo.volume = originalVolume
+    duckedVideo = null
+    originalVolume = null
+  }
+  if (wanted && video.value && !duckedVideo) {
+    duckedVideo = video.value
+    originalVolume = duckedVideo.volume
+    duckedVideo.volume = originalVolume * 0.2
+  }
+}
+watch([video, reminders.speaking, soundEnabled, countdownDucking], updateVideoDucking, { flush: 'sync' })
+
+const unlockSound = (): void => {
+  if (!soundEnabled.value || !window.AudioContext) return
+  try {
+    cueAudio ??= new AudioContext()
+    void cueAudio.resume().catch(() => undefined)
+  } catch {
+    // Optional audio must never prevent deterministic workout controls.
+    cueAudio = null
+  }
+}
+
+watch(countdownSeconds, (seconds) => {
+  if (unduckTimer) clearTimeout(unduckTimer)
+  unduckTimer = null
+  countdownDucking.value = false
+  if (!seconds || !soundEnabled.value || !cueAudio || document.hidden) return
+  reminders.cancel()
+  countdownDucking.value = true
+  const oscillator = cueAudio.createOscillator()
+  const gain = cueAudio.createGain()
+  oscillator.frequency.value = seconds === 1 ? 880 : 660
+  gain.gain.setValueAtTime(0.12, cueAudio.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.001, cueAudio.currentTime + 0.18)
+  oscillator.connect(gain).connect(cueAudio.destination)
+  oscillator.start()
+  oscillator.stop(cueAudio.currentTime + 0.2)
+  oscillator.onended = () => { oscillator.disconnect(); gain.disconnect() }
+  unduckTimer = setTimeout(() => { countdownDucking.value = false; unduckTimer = null }, 250)
+})
+
+const toggleSound = (): void => {
+  soundEnabled.value = !soundEnabled.value
+  if (video.value) video.value.muted = !soundEnabled.value
+  if (!soundEnabled.value) restoreVideoVolume()
+  else unlockSound()
 }
 
 const resolveCurrentMedia = async (): Promise<void> => {
@@ -304,7 +432,7 @@ watch(
 const run = async (
   operation: () => Promise<TrainingEngineResult>,
 ): Promise<TrainingEngineResult | null> => {
-  if (commandPending.value) return null
+  if (commandPending.value || leavePause) return null
   commandPending.value = true
   try {
     const result = await operation()
@@ -317,24 +445,48 @@ const run = async (
 }
 
 const startOrContinue = (): Promise<TrainingEngineResult | null> => run(() => {
+  unlockSound()
+  if ((session.value?.pausedRestSeconds ?? 0) > 0) return training.startSet()
   if (session.value?.status === 'ready_to_continue' || session.value?.status === 'resting') {
     return training.continueRest()
+  }
+  if (session.value?.flowVersion === 'watch-v1'
+    && (session.value.pendingCountdown || ['before_start', 'between_actions'].includes(session.value.pauseReason ?? ''))) {
+    return training.prepareSet()
   }
   return training.startSet()
 })
 
-const pause = (): Promise<TrainingEngineResult | null> => run(() => training.pause('user'))
-const completeSet = (): Promise<TrainingEngineResult | null> => run(() => training.completeSet())
+const pause = (): Promise<TrainingEngineResult | null> => {
+  reminders.cancel()
+  return run(() => training.pause('user'))
+}
+
+const closeAutomaticReminders = async (): Promise<void> => {
+  reminders.cancel()
+  try {
+    await library.setSpeechReminders(false)
+    reminderPreferenceError.value = ''
+  } catch {
+    reminderPreferenceError.value = '本次提醒已关闭，但设置没能保存。重试保存，避免下次重新开启。'
+  }
+}
+const completeSet = (): Promise<TrainingEngineResult | null> => {
+  reminders.cancel()
+  return run(() => training.completeSet())
+}
 const continueEarly = (): Promise<TrainingEngineResult | null> => run(() => training.continueRest())
 const reloadAfterConflict = (): Promise<TrainingEngineResult | null> => run(() => training.restore())
 
 const endEarly = async (): Promise<void> => {
   if (!window.confirm('提前结束后只记录实际完成量，确定结束吗？')) return
+  reminders.cancel()
   await run(() => training.endEarly())
 }
 
 const skipRemaining = async (): Promise<void> => {
-  if (commandPending.value) return
+  if (commandPending.value || leavePause) return
+  reminders.cancel()
   commandPending.value = true
   const result = await training.skipAction()
   commandPending.value = false
@@ -345,11 +497,12 @@ const skipRemaining = async (): Promise<void> => {
   await syncVideo()
 }
 
-const pauseForLeave = async (): Promise<void> => {
-  if (pausePending || training.session?.status !== 'active') return
-  pausePending = true
-  await training.pause('page_hidden')
-  pausePending = false
+const pauseForLeave = (): Promise<void> => {
+  reminders.cancel()
+  video.value?.pause()
+  restoreVideoVolume()
+  leavePause ??= training.pauseForLeave().finally(() => { leavePause = null })
+  return leavePause
 }
 
 const handleVisibility = (): void => {
@@ -366,10 +519,14 @@ onBeforeRouteLeave(async () => {
 })
 
 onMounted(async () => {
-  await training.restore()
-  await resolveCurrentMedia()
+  viewMounted = true
+  // Optional media initialization must not delay cancellation on background/lock.
   document.addEventListener('visibilitychange', handleVisibility)
   window.addEventListener('pagehide', handlePageHide)
+  await training.restore()
+  if (!viewMounted) return
+  await resolveCurrentMedia()
+  if (!viewMounted) return
   ticker = setInterval(() => {
     nowMilliseconds.value = Date.now()
     const current = training.session
@@ -378,8 +535,10 @@ onMounted(async () => {
       && Date.now() >= Date.parse(current.restEndsAt)
     if (
       !commandPending.value
+      && !leavePause
+      && !document.hidden
       && !training.commandLocked
-      && (current?.status === 'active' || expiredRest)
+      && (current?.status === 'active' || current?.status === 'countdown' || expiredRest)
     ) {
       void run(() => training.tick())
     }
@@ -388,6 +547,9 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  viewMounted = false
+  restoreVideoVolume()
+  void cueAudio?.close()
   if (ticker) clearInterval(ticker)
   document.removeEventListener('visibilitychange', handleVisibility)
   window.removeEventListener('pagehide', handlePageHide)
@@ -410,7 +572,7 @@ onBeforeUnmount(() => {
     </header>
 
     <section v-if="!session && training.lastRecord" class="terminal-card">
-      <p class="eyebrow">TrainPal · SESSION SAVED</p>
+      <p class="eyebrow">TrainPal · 训练已保存</p>
       <h1>{{ training.lastRecord.outcome === 'completed' ? '训练完成' : '已提前结束' }}</h1>
       <CoachMotion
         v-if="training.lastRecord.outcome === 'completed'"
@@ -429,7 +591,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section v-else-if="!session" class="training-empty">
-      <p class="eyebrow">TrainPal · NO ACTIVE SESSION</p>
+      <p class="eyebrow">TrainPal</p>
       <h1>还没有未完成训练</h1>
       <p>先选好一份方案，再和 TrainPal 开始训练。</p>
       <RouterLink class="primary-link" to="/plan">返回方案</RouterLink>
@@ -457,6 +619,11 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
+      <div class="session-progress" aria-label="本次训练进度">
+        <span>本次已完成 {{ completedSets }} / {{ totalSets }} 组</span>
+        <progress :value="completedSets" :max="totalSets || 1" aria-label="已完成组数" />
+      </div>
+
       <div class="session-layout">
         <section class="media-stage" :class="{ 'no-video': !item.sourceRef }" aria-label="当前动作参考视频">
           <video
@@ -465,6 +632,7 @@ onBeforeUnmount(() => {
             :src="mediaUrl ?? undefined"
             playsinline
             controls
+            :muted="!soundEnabled"
             preload="metadata"
             @loadedmetadata="syncVideo"
             @timeupdate="keepVideoInSegment"
@@ -478,7 +646,7 @@ onBeforeUnmount(() => {
             <span>正在读取{{ isLocalSource ? '本地' : '参考' }}视频…</span>
           </div>
           <div v-else-if="item.sourceRef" class="media-placeholder" role="status">
-            <span class="no-video-mark">VIDEO UNAVAILABLE</span>
+            <span class="no-video-mark">视频暂不可用</span>
             <strong>{{ isLocalSource ? '本地视频已不可用' : '参考视频暂时不可用' }}</strong>
             <small>{{ localMediaError || '可以继续训练，不影响进度记录' }}</small>
             <label v-if="isLocalSource" class="reselect-local-media">
@@ -491,7 +659,7 @@ onBeforeUnmount(() => {
             </label>
           </div>
           <div v-else class="media-placeholder">
-            <span class="no-video-mark">NO VIDEO</span>
+            <span class="no-video-mark">按自己的节奏练</span>
             <strong>这个动作没有参考视频</strong>
             <small>按自己的节奏完成本组即可</small>
           </div>
@@ -510,86 +678,99 @@ onBeforeUnmount(() => {
           </p>
 
           <div v-if="isRestFocus" class="rest-focus">
-            <CoachMotion
-              class="training-pet training-pet--rest"
-              :style-id="session.coachStyleId"
-              :state="petState"
-              :cue="coachCue"
-              :visible="library.preferences.petVisible"
-            />
             <div class="rest-focus__copy">
               <span>TrainPal · {{ statusLabel }}</span>
-              <strong v-if="session.status === 'resting'">{{ formatDuration(restRemainingSeconds) }}</strong>
-              <strong v-else>准备好了？</strong>
+              <strong v-if="session.status === 'resting' || isPausedRest">{{ formatDuration(restRemainingSeconds) }}</strong>
+              <strong v-else class="ready-readout">准备好了？</strong>
               <p>{{ coachMessage }}</p>
             </div>
           </div>
 
-          <template v-else>
-            <div class="coach-strip">
-              <CoachMotion
-                class="training-pet"
-                :style-id="session.coachStyleId"
-                :state="petState"
-                :cue="coachCue"
-                :visible="library.preferences.petVisible"
-              />
-              <div>
-                <span>TrainPal Coach</span>
-                <p>{{ coachMessage }}</p>
-              </div>
-            </div>
-            <div class="status-readout">
-              <span>{{ statusLabel }}</span>
-              <strong v-if="item.mode === 'duration'">{{ formatDuration(durationRemainingSeconds) }}</strong>
-              <strong v-else>{{ item.reps.value }} 次</strong>
-              <small>
-                已完成 {{ progress?.completedSets ?? 0 }} / {{ targetSets }} 组
-                <template v-if="item.weightKg.value !== null"> · {{ item.weightKg.value }} kg</template>
-              </small>
-            </div>
-          </template>
+          <div v-else class="status-readout">
+            <span>{{ statusLabel }}</span>
+            <strong v-if="session.status === 'countdown'" aria-live="polite">{{ countdownSeconds }}</strong>
+            <strong v-else-if="item.mode === 'duration'">{{ formatDuration(durationRemainingSeconds) }}</strong>
+            <strong v-else>{{ item.reps.value }} 次</strong>
+            <small>
+              已完成 {{ progress?.completedSets ?? 0 }} / {{ targetSets }} 组
+              <template v-if="item.weightKg.value !== null"> · {{ item.weightKg.value }} kg</template>
+            </small>
+          </div>
 
-          <button
-            v-if="session.status === 'paused' || session.status === 'ready_to_continue'"
-            type="button"
-            class="primary-action"
-            :disabled="commandPending || training.commandLocked"
-            @click="startOrContinue"
-          >
-            {{ startActionLabel }}
-          </button>
-          <button
-            v-else-if="session.status === 'resting'"
-            type="button"
-            class="primary-action rest-action"
-            :disabled="commandPending || training.commandLocked"
-            @click="continueEarly"
-          >
-            提前继续
-          </button>
-          <button
-            v-else-if="item.mode === 'reps'"
-            type="button"
-            class="primary-action"
-            :disabled="commandPending || training.commandLocked"
-            @click="completeSet"
-          >
-            完成本组
-          </button>
-          <p v-else class="active-duration-note" role="status">倒计时结束后自动进入休息</p>
-
-          <details class="more-actions">
-            <summary>更多训练操作</summary>
-            <div class="secondary-actions">
+          <div class="training-dock">
+            <PlaybackControls :video="video" :state="petState" :cue="coachCue" @busy="playbackBusy = $event" @handsfree="handsfreeEnabled = $event" @resume="startOrContinue" />
+            <div v-if="!playbackBusy" class="training-controls">
               <button
-                v-if="session.status === 'active'"
+                v-if="session.status === 'countdown'"
+                type="button" class="primary-action" :disabled="commandPending || training.commandLocked" @click="pause"
+              >
+                先暂停
+              </button>
+              <button
+                v-else-if="session.status === 'paused' || session.status === 'ready_to_continue'"
+                type="button"
+                class="primary-action"
+                :disabled="commandPending || training.commandLocked || playbackBusy"
+                @click="startOrContinue"
+              >
+                {{ startActionLabel }}
+              </button>
+              <button
+                v-else-if="session.status === 'resting'"
+                type="button"
+                class="primary-action rest-action"
+                :disabled="commandPending || training.commandLocked"
+                @click="continueEarly"
+              >
+                提前继续
+              </button>
+              <button
+                v-else-if="item.mode === 'reps'"
+                type="button"
+                class="primary-action"
+                :disabled="commandPending || training.commandLocked"
+                @click="completeSet"
+              >
+                完成本组
+              </button>
+              <p v-else class="active-duration-note" role="status">本组计时结束后自动完成</p>
+
+              <button
+                v-if="session.status === 'active' || session.status === 'resting'"
                 type="button"
                 class="pause-training"
                 :disabled="commandPending || training.commandLocked"
                 @click="pause"
               >
                 暂停
+              </button>
+            </div>
+          </div>
+
+          <div v-if="!isRestFocus" class="coach-strip">
+            <div>
+              <span>TrainPal 陪你练</span>
+              <SourceTips v-if="item.sourceTips?.length && (session.status === 'active' || reminders.activeTip.value)" :tips="item.sourceTips" :active-tip="reminders.activeTip.value" />
+              <p v-else>{{ coachMessage }}</p>
+              <small v-if="session.plan.reminderCache" class="reminder-status" role="status">{{ handsfreeEnabled ? '语音唤醒已开启，请查看文字要点' : reminders.message.value }}</small>
+            </div>
+          </div>
+
+          <div class="upcoming-set" aria-label="接下来的安排">
+            <span>{{ session.status === 'paused' ? '继续时的安排' : '接下来' }}</span>
+            <p>{{ upcomingSet ?? '练完这一组，查看本次结果。' }}</p>
+          </div>
+          <p v-if="hasPlayableVideo" class="playback-note">视频可单独播放或暂停；休息一下请用训练暂停。</p>
+
+          <details class="more-actions">
+            <summary>更多训练操作</summary>
+            <div class="secondary-actions">
+              <button type="button" :aria-pressed="!soundEnabled" @click="toggleSound">{{ soundEnabled ? '静音' : '开启声音' }}</button>
+              <button
+                v-if="session.plan.reminderCache && (library.preferences.speechReminders?.automatic_speech || reminderPreferenceError)"
+                type="button" aria-label="关闭自动提醒" :disabled="library.preferencePending" @click="closeAutomaticReminders"
+              >
+                {{ reminderPreferenceError ? '重试保存关闭设置' : '关闭自动提醒' }}
               </button>
               <button
                 v-if="session.status === 'active'"
@@ -604,6 +785,7 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </details>
+          <p v-if="reminderPreferenceError" class="reminder-status" role="alert">{{ reminderPreferenceError }}</p>
         </section>
       </div>
 
@@ -633,7 +815,6 @@ onBeforeUnmount(() => {
     max(24px, env(safe-area-inset-bottom));
   color: var(--tp-training-ink);
   background:
-    radial-gradient(circle at 92% 4%, rgb(165 186 99 / 12%), transparent 28rem),
     var(--tp-training-canvas);
 }
 .training-header,
@@ -643,68 +824,92 @@ onBeforeUnmount(() => {
 .training-header { justify-content: space-between; gap: 12px; margin-bottom: clamp(18px, 4vw, 34px); }
 .training-header a { display: inline-grid; min-height: 44px; place-items: center; color: var(--tp-training-ink); font-size: 12px; font-weight: 800; text-decoration: none; }
 .training-header > div { display: flex; align-items: center; gap: 8px; }
-.training-header button { min-height: 44px; padding: 0 8px; border: 0; color: #ABB4AD; background: transparent; font-size: 11px; }
-.status-pill { display: inline-flex; min-height: 32px; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid rgb(247 243 233 / 15%); border-radius: 999px; color: var(--tp-training-ink); background: rgb(247 243 233 / 6%); font-size: 11px; letter-spacing: .05em; }
-.status-pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--tp-secondary); box-shadow: 0 0 0 4px rgb(165 186 99 / 12%); }
+.training-header button { min-height: 44px; padding: 0 8px; border: 0; color: var(--tp-muted); background: transparent; font-size: 11px; }
+.status-pill { display: inline-flex; min-height: 32px; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid var(--tp-line); border-radius: 12px; color: var(--tp-training-ink); background: rgb(247 243 233 / 6%); font-size: 11px; letter-spacing: .05em; }
+.status-pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--tp-secondary); box-shadow: 0 0 0 4px rgb(25 205 192 / 12%); }
 .eyebrow { margin: 0; color: var(--tp-secondary); font: 700 11px/1 var(--font-display), var(--font-cn); letter-spacing: .14em; text-transform: uppercase; }
-.action-position { margin: 0 0 7px; color: #ABB4AD; font-size: 11px; font-weight: 800; }
+.action-position { margin: 0 0 7px; color: var(--tp-muted); font-size: 11px; font-weight: 800; }
 .session-title { justify-content: space-between; gap: 16px; max-width: 760px; margin-bottom: 16px; }
-.session-title h1 { margin: 7px 0 0; color: var(--tp-training-ink); font: 700 clamp(36px, 10vw, 64px)/.9 var(--font-display), var(--font-cn); letter-spacing: -.025em; }
+.session-title h1 { margin: 7px 0 0; color: var(--tp-training-ink); font: 700 clamp(26px, 6vw, 38px)/1.3 var(--font-display), var(--font-cn); letter-spacing: -.025em; }
 .original-video-link { display: inline-flex; min-width: 44px; min-height: 44px; align-items: center; color: var(--tp-secondary); font-size: 11px; font-weight: 800; text-decoration: none; }
-.set-counter { flex: 0 0 auto; color: #ABB4AD; text-align: right; }
-.set-counter b { color: var(--tp-training-ink); font: 700 clamp(42px, 12vw, 66px)/.75 var(--font-display); }
+.set-counter { flex: 0 0 auto; color: var(--tp-muted); text-align: right; }
+.set-counter b { color: var(--tp-training-ink); font: 700 clamp(26px, 6vw, 36px)/1.1 var(--font-display); }
 .set-counter span { font-size: 11px; }
+.session-progress { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; color: var(--tp-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.session-progress span { flex-shrink: 0; }
+.session-progress progress { width: 100%; height: 6px; overflow: hidden; border: 0; border-radius: 6px; appearance: none; background: var(--tp-line); }
+.session-progress progress::-webkit-progress-bar { background: var(--tp-line); }
+.session-progress progress::-webkit-progress-value { background: var(--tp-secondary); }
+.session-progress progress::-moz-progress-bar { background: var(--tp-secondary); }
 .session-layout { display: grid; gap: 14px; }
-.media-stage { position: relative; overflow: hidden; height: clamp(218px, 41dvh, 460px); border: 1px solid rgb(247 243 233 / 13%); border-radius: 26px; background: #050806; box-shadow: 0 24px 60px rgb(0 0 0 / 34%); }
+.media-stage { position: relative; overflow: hidden; height: clamp(218px, 41dvh, 460px); border: 1px solid var(--tp-line); border-radius: 14px; background: var(--tp-media-canvas); box-shadow: var(--tp-shadow-soft); }
+.media-stage:has(.media-placeholder) { height: 180px; }
 .media-stage video { width: 100%; height: 100%; object-fit: contain; }
-.media-placeholder { display: grid; height: 100%; place-content: center; gap: 8px; padding: 20px; color: #ABB4AD; text-align: center; }
+.media-placeholder { display: grid; height: 100%; place-content: center; gap: 8px; padding: 20px; color: var(--tp-muted); background: var(--tp-surface-raised); text-align: center; }
 .media-placeholder strong { color: var(--tp-training-ink); font-size: 18px; }
 .media-placeholder small { font-size: 11px; }
-.reselect-local-media { position: relative; display: inline-grid; min-height: 44px; margin-top: 6px; place-items: center; overflow: hidden; border: 1px solid rgb(247 243 233 / 24%); border-radius: 999px; color: var(--tp-secondary); font-size: 11px; font-weight: 800; cursor: pointer; }
+.reselect-local-media { position: relative; display: inline-grid; min-height: 44px; margin-top: 6px; place-items: center; overflow: hidden; border: 1px solid var(--tp-line); border-radius: 12px; color: var(--tp-secondary); font-size: 11px; font-weight: 800; cursor: pointer; }
 .reselect-local-media:focus-within { outline: 2px solid var(--tp-focus); outline-offset: 3px; }
 .reselect-local-media input { position: absolute; width: 1px; height: 1px; opacity: 0; }
-.local-storage-message { position: absolute; right: 12px; bottom: 12px; left: 12px; z-index: 2; padding: 8px 10px; border-radius: 10px; color: var(--tp-secondary); background: rgb(14 19 17 / 86%); line-height: 1.5; text-align: center; }
-.no-video-mark { color: #EF745B; font: 700 12px/1 var(--font-display); letter-spacing: .16em; }
-.stage-badge { position: absolute; top: 12px; left: 12px; padding: 7px 10px; border: 1px solid rgb(247 243 233 / 13%); border-radius: 999px; color: var(--tp-training-ink); background: rgb(14 19 17 / 82%); font-size: 11px; backdrop-filter: blur(10px); }
-.training-console { position: relative; padding: 16px; border: 1px solid rgb(247 243 233 / 13%); border-radius: 26px; background: var(--tp-training-surface); box-shadow: 0 22px 54px rgb(0 0 0 / 30%); }
-.coach-strip { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; margin-bottom: 10px; padding: 10px 12px; border-radius: 18px; background: rgb(165 186 99 / 9%); }
+.local-storage-message { position: absolute; right: 12px; bottom: 12px; left: 12px; z-index: 2; padding: 8px 10px; border-radius: 10px; color: #FFFFFF; background: rgb(14 19 17 / 86%); line-height: 1.5; text-align: center; }
+.no-video-mark { color: var(--tp-primary-readable); font: 700 12px/1 var(--font-display); letter-spacing: .16em; }
+.stage-badge { position: absolute; top: 12px; left: 12px; padding: 7px 10px; border: 1px solid var(--tp-line); border-radius: 12px; color: #FFFFFF; background: rgb(14 19 17 / 82%); font-size: 11px; backdrop-filter: blur(10px); }
+.training-console { position: relative; padding: 16px; border: 1px solid var(--tp-line); border-radius: 14px; background: var(--tp-training-surface); box-shadow: none; }
+.coach-strip { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; margin-top: 16px; padding: 10px 12px; border-radius: 18px; background: rgb(25 205 192 / 9%); }
 .coach-strip :deep(.trainpal-coach__image) { width: clamp(58px, 18vw, 78px); }
 .coach-strip span,
 .rest-focus__copy > span { color: var(--tp-secondary); font: 700 11px/1 var(--font-display), var(--font-cn); letter-spacing: .12em; }
 .coach-strip p { margin: 5px 0 0; color: var(--tp-training-ink); font-size: 12px; line-height: 1.5; }
+.coach-strip:not(:has(.trainpal-coach)) { grid-template-columns: 1fr; }
+.coach-strip :deep(.source-tips) { margin: 4px 0 0; padding: 0; background: transparent; }
 .status-readout { display: grid; justify-items: center; margin: 8px 0 14px; }
-.status-readout span { color: #ABB4AD; font-size: 11px; font-weight: 700; }
+.status-readout span { color: var(--tp-muted); font-size: 11px; font-weight: 700; }
 .status-readout strong { margin: 5px 0; color: var(--tp-training-ink); font: 700 clamp(52px, 16vw, 76px)/.85 var(--font-display); }
-.status-readout small { color: #ABB4AD; font-size: 11px; }
+.status-readout small { color: var(--tp-muted); font-size: 11px; }
 .rest-focus { display: grid; justify-items: center; gap: 2px; padding: 4px 0 16px; text-align: center; }
 .training-pet--rest :deep(.trainpal-coach__image) { width: clamp(104px, 34vw, 152px); }
 .rest-focus__copy strong { display: block; margin: 9px 0 8px; color: var(--tp-training-ink); font: 700 clamp(58px, 19vw, 92px)/.82 var(--font-display), var(--font-cn); }
-.rest-focus__copy p { max-width: 320px; margin: 0; color: #ABB4AD; font-size: 12px; line-height: 1.55; }
+.rest-focus__copy p { max-width: 320px; margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.55; }
+.rest-focus__copy strong.ready-readout { font-size: 32px; line-height: 1.3; }
+.upcoming-set { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--tp-line); }
+.upcoming-set span { color: var(--tp-muted); font-size: 11px; }
+.upcoming-set p { margin: 5px 0 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.playback-note { margin: 8px 0 0; color: var(--tp-muted); font-size: 11px; line-height: 1.6; }
 .primary-action,
-.primary-link { display: grid; width: 100%; min-height: 52px; place-items: center; border: 1px solid var(--tp-primary); border-radius: 999px; color: var(--tp-training-ink); background: var(--tp-primary-readable); box-shadow: 0 12px 28px rgb(217 75 43 / 25%); font-weight: 800; text-decoration: none; }
-.rest-action { border-color: var(--tp-secondary); color: var(--tp-training-canvas); background: var(--tp-secondary); box-shadow: 0 12px 28px rgb(165 186 99 / 20%); }
+.primary-link { display: grid; width: 100%; min-height: 52px; place-items: center; border: 1px solid var(--tp-primary); border-radius: 12px; color: var(--tp-on-primary); background: var(--tp-primary); box-shadow: var(--tp-shadow-soft); font-weight: 800; text-decoration: none; }
+.rest-action { border-color: var(--tp-secondary); color: var(--tp-training-canvas); background: var(--tp-secondary); box-shadow: 0 12px 28px rgb(25 205 192 / 20%); }
 .primary-action:disabled { opacity: .5; }
-.active-duration-note { min-height: 44px; margin: 0; color: #ABB4AD; font-size: 11px; line-height: 44px; text-align: center; }
+.training-controls { display: grid; gap: 8px; }
+.training-controls:has(.pause-training) { grid-template-columns: minmax(0, 1fr) auto; }
+.pause-training { min-width: 80px; min-height: 52px; padding: 0 16px; border: 1px solid var(--tp-secondary); border-radius: 12px; color: var(--tp-training-ink); background: transparent; font-weight: 700; }
+.pause-training:disabled { opacity: .5; }
+.active-duration-note { align-self: center; margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.6; }
 .more-actions { margin-top: 6px; }
-.more-actions summary { display: grid; min-height: 44px; place-items: center; color: #ABB4AD; font-size: 11px; font-weight: 700; cursor: pointer; list-style: none; }
+ .more-actions summary { display: flex; min-height: 44px; align-items: center; justify-content: center; color: var(--tp-muted); font-size: 11px; font-weight: 700; cursor: pointer; list-style: none; }
 .more-actions summary::-webkit-details-marker { display: none; }
 .more-actions summary::after { content: '＋'; margin-left: 6px; }
 .more-actions[open] summary::after { content: '－'; }
-.secondary-actions { justify-content: center; flex-wrap: wrap; gap: 5px; padding-top: 4px; border-top: 1px solid rgb(247 243 233 / 10%); }
-.secondary-actions button { min-height: 44px; padding: 0 10px; border: 0; color: #ABB4AD; background: transparent; font-size: 11px; }
-.secondary-actions .danger { color: #EF745B; }
-.training-error { margin: 12px 0 0; padding: 10px; border: 1px solid rgb(239 116 91 / 24%); border-radius: 12px; color: #FF9B86; background: rgb(239 116 91 / 8%); font-size: 11px; text-align: center; }
-.training-error button { display: block; min-height: 44px; margin: 6px auto 0; padding: 0 12px; border: 1px solid rgb(239 116 91 / 35%); border-radius: 999px; color: #FF9B86; background: transparent; font-weight: 700; }
+.secondary-actions { justify-content: center; flex-wrap: wrap; gap: 5px; padding-top: 4px; border-top: 1px solid var(--tp-line); }
+.secondary-actions button { min-height: 44px; padding: 0 10px; border: 0; color: var(--tp-muted); background: transparent; font-size: 11px; }
+.secondary-actions .danger { color: var(--tp-primary-readable); }
+.training-error { margin: 12px 0 0; padding: 10px; border: 1px solid rgb(239 116 91 / 24%); border-radius: 12px; color: var(--tp-danger); background: rgb(239 116 91 / 8%); font-size: 11px; text-align: center; }
+.training-error button { display: block; min-height: 44px; margin: 6px auto 0; padding: 0 12px; border: 1px solid rgb(239 116 91 / 35%); border-radius: 12px; color: var(--tp-danger); background: transparent; font-weight: 700; }
 .terminal-card,
-.training-empty { width: min(100%, 520px); margin: 12vh auto 0; padding: clamp(24px, 8vw, 42px); border: 1px solid rgb(247 243 233 / 18%); border-radius: 30px; background: var(--tp-training-surface); box-shadow: 0 24px 60px rgb(0 0 0 / 30%); text-align: center; }
+.training-empty { width: min(100%, 520px); margin: 12vh auto 0; padding: clamp(24px, 8vw, 42px); border: 1px solid var(--tp-line); border-radius: 14px; background: var(--tp-training-surface); box-shadow: none; text-align: center; }
 .terminal-card h1,
-.training-empty h1 { margin: 10px 0; color: var(--tp-training-ink); font: 700 clamp(42px, 13vw, 62px)/.9 var(--font-display), var(--font-cn); }
+.training-empty h1 { margin: 10px 0; color: var(--tp-training-ink); font: 700 clamp(28px, 7vw, 40px)/1.3 var(--font-display), var(--font-cn); }
 .terminal-card > p:not(.eyebrow),
-.training-empty > p:not(.eyebrow) { color: #ABB4AD; font-size: 12px; }
+.training-empty > p:not(.eyebrow) { color: var(--tp-muted); font-size: 12px; }
 .terminal-metrics { justify-content: center; gap: clamp(12px, 6vw, 30px); margin: 24px 0; }
-.terminal-metrics span { color: #ABB4AD; font-size: 11px; }
+.terminal-metrics span { color: var(--tp-muted); font-size: 11px; }
 .terminal-metrics b { display: block; color: var(--tp-training-ink); font: 700 28px/1 var(--font-display); }
 .terminal-card :deep(.trainpal-coach) { margin: 18px auto -8px; }
+
+@media (max-width: 799px) {
+  .training-page { padding-bottom: calc(220px + env(safe-area-inset-bottom)); }
+  .media-stage { height: clamp(180px, 32dvh, 300px); }
+  .training-dock { position: fixed; right: 0; bottom: 0; left: 0; z-index: 20; padding: 12px max(16px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); border-top: 1px solid var(--tp-line); background: var(--tp-training-canvas); }
+}
 
 @media (min-width: 800px) {
   .session-title { max-width: none; }
@@ -713,4 +918,25 @@ onBeforeUnmount(() => {
   .training-console { display: flex; min-height: 480px; flex-direction: column; justify-content: center; padding: 24px; }
   .more-actions { margin-top: 12px; }
 }
+
+.session-title h1 { font-family: var(--font-cn); font-size: 24px; }
+.training-console { background: var(--tp-surface); }
+.status-readout span, .status-readout small, .rest-focus__copy p, .coach-strip p { font-size: 14px; }
+.status-readout strong { margin: 14px 0; }
+.rest-action { color: var(--tp-on-primary); border-color: var(--tp-primary); background: var(--tp-primary); box-shadow: none; }
+.coach-strip { border-radius: 0; padding: 10px 0; background: transparent; }
+.coach-strip :deep(.coach-motion__image) { width: 58px; max-height: 68px; }
+.training-pet--rest :deep(.coach-motion__image) { width: 96px; max-height: 110px; }
+.upcoming-set p { font-size: 14px; }
+.session-progress progress::-webkit-progress-value { background: var(--tp-primary); }
+.session-progress progress::-moz-progress-bar { background: var(--tp-primary); }
+@media (max-width: 799px) {
+  .training-header { margin-bottom: 8px; }
+  .session-title { margin-bottom: 10px; }
+  .session-progress { margin-bottom: 12px; }
+  .media-stage { height: clamp(160px, 28dvh, 280px); }
+  .training-console { border: 0; padding: 12px 4px; background: transparent; }
+  .training-dock { background: var(--tp-surface); }
+}
+
 </style>

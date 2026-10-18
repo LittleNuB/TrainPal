@@ -55,6 +55,9 @@ class MemoryLibraryRepository implements LibraryRepository {
   clearCalls = 0
   failPreferences = false
 
+  async listActionFeedback() { return [] }
+  async saveActionFeedback(): Promise<never> { throw new Error('not used') }
+  async removeActionFeedback() {}
   async listPlans() { return structuredClone(this.plans) }
   async listRecords() { return structuredClone(this.records) }
   async loadProfile() { return structuredClone(this.profile) }
@@ -237,7 +240,7 @@ describe('我的', () => {
 
     expect(repository.profile?.age).toBe(28)
     expect(wrapper.get('.notice').text()).toBe('训练档案已保存到本机')
-    expect(wrapper.get('.profile-panel').text()).toContain('全部字段都可跳过')
+    expect(wrapper.get('.profile-panel').text()).toContain('都可以留空')
   })
 
   it('shows a safe notice when the TrainPal visibility preference cannot be saved', async () => {

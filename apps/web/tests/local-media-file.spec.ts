@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   CLOUDBASE_DEMO_UPLOAD_MAX_BYTES,
@@ -13,6 +13,16 @@ const capabilities = {
 }
 
 describe('local media file gate', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('accepts a 28 MB local video when the current server allows it', () => {
+    const file = new File(['x'], '训练.mp4', { type: 'video/mp4' })
+    Object.defineProperty(file, 'size', { value: 28_000_000 })
+    expect(validateLocalMediaFile(file, 208, {
+      local_upload_enabled: true, local_analysis_max_seconds: 300,
+      local_upload_max_bytes: 268_435_456,
+    })).toEqual({ ok: true })
+  })
   it('accepts a supported file inside the deployed size and duration limits', () => {
     const file = new File(['12345'], '训练.mp4', { type: 'video/mp4' })
     expect(validateLocalMediaFile(file, 59.9, capabilities)).toEqual({ ok: true })
@@ -41,6 +51,7 @@ describe('local media file gate', () => {
   })
 
   it('leaves multipart headroom below the CloudBase 20 MB request envelope', () => {
+    vi.stubEnv('VITE_UPLOAD_MAX_BYTES', '19000000')
     const cloudCapabilities = {
       ...capabilities,
       local_analysis_max_seconds: 300,

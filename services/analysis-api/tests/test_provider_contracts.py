@@ -355,6 +355,10 @@ async def test_ark_inline_video_uses_visual_model_without_remote_file_upload(
     assert response_payload["model"] == "doubao-mini-test"
     assert response_payload["store"] is False
     assert response_payload["thinking"] == {"type": "disabled"}
+    evidence_type = response_payload["text"]["format"]["schema"]["$defs"]["EvidenceSpan"][
+        "properties"
+    ]["type"]
+    assert evidence_type == {"type": "string", "const": "visual"}
     content = response_payload["input"][0]["content"]
     assert content[0]["type"] == "input_video"
     assert content[0]["fps"] == 1
@@ -472,6 +476,61 @@ async def test_ark_contact_sheet_uses_visual_model_without_file_upload(
         "order": "row_major",
     }
     assert len(respx.calls) == 1
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize("evidence_type", ["speech", "visual"])
+async def test_visual_tips_keep_their_source_type_guard(evidence_type: str, tmp_path: Path) -> None:
+    video = tmp_path / "window.mp4"
+    video.write_bytes(b"video-bytes")
+    response = respx.post("https://ark.example/api/v3/responses").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "output_text": json.dumps(
+                    {
+                        "segments": [
+                            {
+                                "action_name": "侧平举",
+                                "start_seconds": 2,
+                                "end_seconds": 8,
+                                "visual_cue": "画面字幕提示动作要点",
+                                "tips": [
+                                    {
+                                        "text": "保持肩部稳定",
+                                        "category": "setup",
+                                        "evidence": {
+                                            "type": evidence_type,
+                                            "start_seconds": 3,
+                                            "end_seconds": 5,
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        )
+    )
+    async with httpx.AsyncClient() as http_client:
+        client = ArkResponsesClient(
+            api_key="test-key",
+            model_id="test-model",
+            base_url="https://ark.example/api/v3",
+            http_client=http_client,
+        )
+        result = await client.locate_visual(
+            video_path=video,
+            window=Segment(start_seconds=0, end_seconds=10),
+            instructions="visual skill contract",
+        )
+    assert len(result.segments) == 1
+    assert result.segments[0].action_name == "侧平举"
+    assert len(result.segments[0].tips) == (1 if evidence_type == "visual" else 0)
+    assert len(response.calls) == 1
 
 
 @pytest.mark.asyncio

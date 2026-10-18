@@ -20,7 +20,7 @@ import PersonalizeView from '@/views/PersonalizeView.vue'
 import TrainHubView from '@/views/TrainHubView.vue'
 
 const emptyLibrary = (): LibraryRepository => ({
-  listPlans: async () => [],
+  listActionFeedback: async () => [],  saveActionFeedback: async () => { throw new Error('not used') },  removeActionFeedback: async () => {},  listPlans: async () => [],
   listRecords: async () => [],
   loadProfile: async () => null,
   loadPreferences: async () => null,

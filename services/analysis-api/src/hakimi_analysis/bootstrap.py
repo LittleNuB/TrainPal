@@ -22,10 +22,12 @@ from hakimi_analysis.models import (
 )
 from hakimi_analysis.orchestration import OrchestratedAnalysisPipeline, SkillRepository
 from hakimi_analysis.pipeline import AnalysisPipeline, EmitCallback, PipelineFailure, PipelineOutput
+from hakimi_analysis.playback import PlaybackService
 from hakimi_analysis.providers.ark import ArkResponsesClient
 from hakimi_analysis.providers.asr import VolcAsrClient
 from hakimi_analysis.readiness import ProductionReadiness
 from hakimi_analysis.runtime_cleanup import RuntimeCleanupMonitor
+from hakimi_analysis.semantic_fusion import SemanticCandidateFusion
 from hakimi_analysis.settings import PROJECT_ROOT, Settings
 from hakimi_analysis.sources import (
     MAX_ANALYZABLE_SOURCE_DURATION_SECONDS,
@@ -173,6 +175,7 @@ def build_pipeline(
         asr=asr,
         ark=ark,
         skills=skills,
+        semantic_fusion=SemanticCandidateFusion(model=ark, instructions=skills.fusion_instructions),
         evidence_timeout_seconds=settings.analysis_evidence_timeout_seconds,
         visual_chunk_timeout_seconds=settings.analysis_chunk_timeout_seconds,
         visual_chunk_seconds=settings.analysis_visual_chunk_seconds,
@@ -273,6 +276,7 @@ def build_default_app() -> FastAPI:
         skills_root=PROJECT_ROOT / "skills",
     )
     return create_app(
+        playback_service=build_playback_service(settings, http_client),
         catalog=catalog,
         pipeline=build_pipeline(
             settings,
@@ -299,3 +303,29 @@ def build_default_app() -> FastAPI:
         release_sha=settings.app_release_sha,
         runtime_cleanup=runtime_cleanup,
     )
+
+
+def build_playback_service(
+    settings: Settings, http_client: httpx.AsyncClient
+) -> PlaybackService | None:
+    if settings.app_env == "test" or settings.ark_api_key is None:
+        return None
+    model = ArkResponsesClient(
+        api_key=settings.ark_api_key.get_secret_value(),
+        model_id=settings.ark_model_id,
+        base_url=settings.ark_base_url,
+        http_client=http_client,
+        retry_delays=(),
+    )
+    asr = (
+        VolcAsrClient(
+            api_key=settings.volc_asr_api_key.get_secret_value(),
+            resource_id=settings.volc_asr_resource_id,
+            url=settings.volc_asr_url,
+            pace_audio=False,
+            retry_delays=(),
+        )
+        if settings.volc_asr_api_key
+        else None
+    )
+    return PlaybackService(model=model, asr=asr)

@@ -159,6 +159,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/playback-adjustments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Select Playback */
+        post: operations["select_playback_api_v1_playback_adjustments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playback-voice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Transcribe Playback */
+        post: operations["transcribe_playback_api_v1_playback_voice_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ready": {
         parameters: {
             query?: never;
@@ -210,6 +244,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/training-reminders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Plan Training Reminders */
+        post: operations["plan_training_reminders_api_v1_training_reminders_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -242,10 +293,16 @@ export interface components {
             name: string;
             /** Needs Confirmation */
             needs_confirmation: boolean;
+            /** Parameter Conflicts */
+            parameter_conflicts?: components["schemas"]["ParameterConflict"][];
             parameters: components["schemas"]["CandidateParameters"];
+            /** Playback Options */
+            playback_options?: components["schemas"]["SourceClip"][];
             segment: components["schemas"]["Segment"];
             /** Source Id */
             source_id: string;
+            /** Tips */
+            tips?: components["schemas"]["SourceTip"][];
         };
         /** AnalysisError */
         AnalysisError: {
@@ -305,7 +362,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "speech_unavailable" | "visual_unavailable";
+            code: "speech_unavailable" | "visual_unavailable" | "semantic_fusion_unavailable" | "semantic_fusion_conflict";
             /** Message */
             message: string;
         };
@@ -332,6 +389,8 @@ export interface components {
             mode?: components["schemas"]["ActionMode"] | null;
             /** Reps */
             reps?: number | null;
+            /** Reps Max */
+            reps_max?: number | null;
             /** Rest Seconds */
             rest_seconds?: number | null;
             /** Sets */
@@ -481,6 +540,27 @@ export interface components {
              */
             status: "not_ready";
         };
+        /** ParameterAlternative */
+        ParameterAlternative: {
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceSpan"][];
+            parameters: components["schemas"]["CandidateParameters"];
+        };
+        /** ParameterConflict */
+        ParameterConflict: {
+            /** Alternatives */
+            alternatives: components["schemas"]["ParameterAlternative"][];
+            /**
+             * Field
+             * @enum {string}
+             */
+            field: "mode" | "sets" | "reps" | "duration_seconds" | "rest_seconds";
+        };
+        /** PlaybackChoice */
+        PlaybackChoice: {
+            /** Option Id */
+            option_id: string | null;
+        };
         /** ReadyResponse */
         ReadyResponse: {
             /**
@@ -488,6 +568,63 @@ export interface components {
              * @constant
              */
             status: "ready";
+        };
+        /** ReminderBudget */
+        ReminderBudget: {
+            /** Action Id */
+            action_id: string;
+            /**
+             * Active Interval Seconds
+             * @default 30
+             * @constant
+             */
+            active_interval_seconds: 30;
+            /**
+             * End Quiet Seconds
+             * @default 10
+             * @constant
+             */
+            end_quiet_seconds: 10;
+            /** Utterance Limit */
+            utterance_limit: number;
+        };
+        /** ReminderPlan */
+        ReminderPlan: {
+            /** Budgets */
+            budgets?: components["schemas"]["ReminderBudget"][];
+            /**
+             * Contract Version
+             * @default training-reminders.v1.1
+             * @constant
+             */
+            contract_version: "training-reminders.v1.1";
+            /** Fallback Reason */
+            fallback_reason?: ("model_unavailable" | "model_failure" | "model_timeout" | "invalid_selection" | "skill_unavailable") | null;
+            /** Input Fingerprint */
+            input_fingerprint: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "model" | "rules" | "disabled";
+            /** Plan Id */
+            plan_id: string;
+            /** Plan Revision */
+            plan_revision: number;
+            /**
+             * Policy Version
+             * @default ReminderPolicy.v1
+             * @constant
+             */
+            policy_version: "ReminderPolicy.v1";
+            /** Reminders */
+            reminders: components["schemas"]["ScheduledReminder"][];
+            /**
+             * Skill Version
+             * @default 1.0.0
+             * @constant
+             */
+            skill_version: "1.0.0";
         };
         /**
          * RunStage
@@ -499,10 +636,50 @@ export interface components {
          * @enum {string}
          */
         RunStatus: "queued" | "running" | "completed" | "failed" | "cancelled";
+        /** ScheduledReminder */
+        ScheduledReminder: {
+            /** Action Id */
+            action_id: string;
+            /** Action Revision */
+            action_revision: number;
+            /** Active Seconds */
+            active_seconds?: number | null;
+            /**
+             * Max Plays
+             * @default 1
+             * @constant
+             */
+            max_plays: 1;
+            /** Priority */
+            priority: number;
+            /** Set Number */
+            set_number: number;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "prepare" | "training";
+            /** Tip Id */
+            tip_id: string;
+            /**
+             * Trigger
+             * @enum {string}
+             */
+            trigger: "action_prepare" | "set_start" | "active_elapsed";
+        };
         /** Segment */
         Segment: {
             /** End Seconds */
             end_seconds: number;
+            /** Start Seconds */
+            start_seconds: number;
+        };
+        /** SourceClip */
+        SourceClip: {
+            /** End Seconds */
+            end_seconds: number;
+            /** Label */
+            label: string;
             /** Start Seconds */
             start_seconds: number;
         };
@@ -518,6 +695,17 @@ export interface components {
             origin_url?: string | null;
             /** Title */
             title: string;
+        };
+        /** SourceTip */
+        SourceTip: {
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "setup" | "path" | "breathing" | "rhythm" | "caution";
+            evidence: components["schemas"]["EvidenceSpan"];
+            /** Text */
+            text: string;
         };
         /** UpgradeAccessSessionRequest */
         UpgradeAccessSessionRequest: {
@@ -536,6 +724,11 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** VoiceCommand */
+        VoiceCommand: {
+            /** Text */
+            text: string;
         };
     };
     responses: never;
@@ -1050,6 +1243,71 @@ export interface operations {
             };
         };
     };
+    select_playback_api_v1_playback_adjustments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Action Name */
+                    action_name: string;
+                    /** Instruction */
+                    instruction: string;
+                    /** Options */
+                    options: {
+                        /** End Seconds */
+                        end_seconds: number;
+                        /** Id */
+                        id: string;
+                        /** Label */
+                        label: string;
+                        /** Start Seconds */
+                        start_seconds: number;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaybackChoice"];
+                };
+            };
+        };
+    };
+    transcribe_playback_api_v1_playback_voice_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Single-channel 16-bit 16000 Hz PCM WAV, at most 15 seconds and 480044 bytes. */
+        requestBody: {
+            content: {
+                "audio/wav": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceCommand"];
+                };
+            };
+        };
+    };
     ready_api_v1_ready_get: {
         parameters: {
             query?: never;
@@ -1126,6 +1384,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plan_training_reminders_api_v1_training_reminders_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Bounded UTF-8 JSON, at most 64000 bytes; no training-state writes. */
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Actions */
+                    actions: {
+                        /** Action Id */
+                        action_id: string;
+                        /** Action Revision */
+                        action_revision: number;
+                        /** Confirmed */
+                        confirmed: boolean;
+                        /** Duration Seconds */
+                        duration_seconds?: number | null;
+                        /**
+                         * Mode
+                         * @enum {string}
+                         */
+                        mode: "reps" | "duration";
+                        /** Name */
+                        name: string;
+                        /** Reps */
+                        reps?: number | null;
+                        /** Sets */
+                        sets: number;
+                        /** Source Id */
+                        source_id?: string | null;
+                        source_segment?: {
+                            /** End Seconds */
+                            end_seconds: number;
+                            /** Start Seconds */
+                            start_seconds: number;
+                        } | null;
+                        /** Tips */
+                        tips?: {
+                            /** Review Action Id */
+                            review_action_id: string;
+                            /** Review Action Revision */
+                            review_action_revision: number;
+                            /**
+                             * Review Status
+                             * @default unknown
+                             * @enum {string}
+                             */
+                            review_status?: "approved" | "unknown" | "rejected";
+                            /** Source Id */
+                            source_id: string;
+                            /** SourceTip */
+                            tip: {
+                                /**
+                                 * Category
+                                 * @enum {string}
+                                 */
+                                category: "setup" | "path" | "breathing" | "rhythm" | "caution";
+                                /** EvidenceSpan */
+                                evidence: {
+                                    /** End Seconds */
+                                    end_seconds: number;
+                                    /** Start Seconds */
+                                    start_seconds: number;
+                                    /**
+                                     * EvidenceType
+                                     * @enum {string}
+                                     */
+                                    type: "speech" | "visual";
+                                };
+                                /** Text */
+                                text: string;
+                            };
+                            /** Tip Id */
+                            tip_id: string;
+                        }[];
+                    }[];
+                    /** Plan Id */
+                    plan_id: string;
+                    /** Plan Revision */
+                    plan_revision: number;
+                    /** ReminderPreferences */
+                    preferences: {
+                        /** Automatic Speech */
+                        automatic_speech: boolean;
+                        /** Confirmed */
+                        confirmed: boolean;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReminderPlan"];
                 };
             };
         };

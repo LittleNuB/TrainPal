@@ -185,7 +185,7 @@ class InconsistentPartialCoveragePipeline:
         )
 
 
-def source_catalog(tmp_path: Path) -> SourceCatalog:
+def source_catalog(tmp_path: Path, *, duration_seconds: float = 54) -> SourceCatalog:
     path = tmp_path / "source.mp4"
     path.write_bytes(b"not-used-by-the-test-pipeline")
     return SourceCatalog(
@@ -194,7 +194,7 @@ def source_catalog(tmp_path: Path) -> SourceCatalog:
                 id="legacy-arm-workout",
                 title="本地联调视频",
                 path=path,
-                duration_seconds=54,
+                duration_seconds=duration_seconds,
             )
         ]
     )

@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "date": "2026-10-09",
+  "status": "approved",
+  "approval": "用户通过完整 18 屏图册，并要求制定执行计划",
+  "codeBaseline": "cb8f788be92f79733c949c4bc1a936ebb112f2a9",
+  "implementationPlan": "trainpal-sport-ai-implementation-20261009.md",
+  "gallery": "../../tmp/visual-reference-final-mobile-20261009/index.html",
+  "accordionPrototype": "../../tmp/visual-reference-ai-collapsible-cards-20261009/prototype.html",
+  "total": 18,
+  "mainScreens": 11,
+  "stateScreens": 7,
+  "screens": [
+    {
+      "id": "01",
+      "title": "视频输入",
+      "kind": "主页面",
+      "route": "/",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/01-video-input.png",
+      "sha256": "228c6ab54b027849af99560e2e09c11abc8a43a790165d59c6587d2db3761abd"
+    },
+    {
+      "id": "02",
+      "title": "快速开始",
+      "kind": "状态",
+      "route": "/",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/02-quick-start.png",
+      "sha256": "7a80868e04e2202ec0ba4870ec3be082930f201e741f3e797aba460a09990527"
+    },
+    {
+      "id": "03",
+      "title": "视频分析",
+      "kind": "主页面",
+      "route": "/analysis",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/03-analysis-running.png",
+      "sha256": "3f9ebb6b48ab2baadf6f50fafd37695348b269b386cc106ac9365607e3852dde"
+    },
+    {
+      "id": "04",
+      "title": "分析完成",
+      "kind": "状态",
+      "route": "/analysis",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/04-analysis-ready.png",
+      "sha256": "d71bfb6af95f79f300b5151fd8bff00dda029f5b78b9689c6be863f61519565d"
+    },
+    {
+      "id": "05",
+      "title": "训练方案 · 单动作展开",
+      "kind": "主页面",
+      "route": "/plan",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/05-plan-accordion.png",
+      "sha256": "36a180ffafd34d19fb510857487d0e324592f603fd791fe7ff1883a8042e1b38"
+    },
+    {
+      "id": "06",
+      "title": "AI 调整预览",
+      "kind": "状态",
+      "route": "/plan",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/06-ai-adjustment-preview.png",
+      "sha256": "4e8eca80a37c5615bf745f8ea8c63dad6d03a1e1b936099c3d9c4de34a674bc9"
+    },
+    {
+      "id": "07",
+      "title": "视频来源详情",
+      "kind": "状态",
+      "route": "/plan",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/07-source-detail.png",
+      "sha256": "17f24b3dae4670f9628e1549bb2a182648e6c41f0c42443def4a854a96ed79ad"
+    },
+    {
+      "id": "08",
+      "title": "训练库",
+      "kind": "主页面",
+      "route": "/train",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/08-training-library.png",
+      "sha256": "a081a47f649a87ebde5d1d9353e9c22255755ed3cbe1b14dde3fc9b14a381834"
+    },
+    {
+      "id": "09",
+      "title": "跟练中",
+      "kind": "主页面",
+      "route": "/training",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/09-workout-active.png",
+      "sha256": "5c4f88ace8ed514ed934dc14e7fafd42d08a5b5f126cf508f967cfe836462614"
+    },
+    {
+      "id": "10",
+      "title": "组间休息",
+      "kind": "状态",
+      "route": "/training",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/10-workout-rest.png",
+      "sha256": "fa95b4a6b7aa20ed0e330ec9324c1502a494b0cf5f0f84203ff6df007576475d"
+    },
+    {
+      "id": "11",
+      "title": "暂停训练",
+      "kind": "状态",
+      "route": "/training",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/11-workout-paused.png",
+      "sha256": "0209f6d438727ea2195012733525037cfb4553a95cb8d722c423d58449ebbd64"
+    },
+    {
+      "id": "12",
+      "title": "训练结果",
+      "kind": "主页面",
+      "route": "/result/:recordId",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/12-training-result.png",
+      "sha256": "ec4d3a2151467c6c05b2cc1a9c60f09ed10b8a86b0b9a1eec689bb50ea4e4bbc"
+    },
+    {
+      "id": "13",
+      "title": "我的",
+      "kind": "主页面",
+      "route": "/mine",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/13-mine.png",
+      "sha256": "45fedd676406a8b8f15d44a0e8db3cbca2fa03b912e4cadbec971e9be564d30f"
+    },
+    {
+      "id": "14",
+      "title": "可选资料",
+      "kind": "主页面",
+      "route": "/personalize",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/14-optional-profile.png",
+      "sha256": "35c76657db8ed0193c97aa5383b4d5545948376103b3884bf09375cd1f264fe0"
+    },
+    {
+      "id": "15",
+      "title": "GYMTI 测评",
+      "kind": "主页面",
+      "route": "/personalize",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/15-gymti-question.png",
+      "sha256": "a1a965fded846d25357aa99516a124ffc4a2b2d8b3d71855fc06cce65636f334"
+    },
+    {
+      "id": "16",
+      "title": "GYMTI 结果",
+      "kind": "主页面",
+      "route": "/personalize",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/16-gymti-result.png",
+      "sha256": "7539c058f10fe3e00f7761f93d05d07c3417836e3a27dd4eb49e865e28b50ad5"
+    },
+    {
+      "id": "17",
+      "title": "小猫教练选择",
+      "kind": "主页面",
+      "route": "/personalize",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/17-coach-picker.png",
+      "sha256": "52dee1c0f9a214e1fa3a32d3ddcdd3358725ac3a55d47636805b5ea393882aa6"
+    },
+    {
+      "id": "18",
+      "title": "准备下一动作",
+      "kind": "状态",
+      "route": "/training",
+      "reference": "../../tmp/visual-reference-final-mobile-20261009/18-next-action.png",
+      "sha256": "98a3d5afb5dd15926c90ec00c94e1af880b56cc1e26176f17dc5f058db01c868"
+    }
+  ]
+}

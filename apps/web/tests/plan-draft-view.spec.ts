@@ -29,7 +29,7 @@ class RecoverableDraftRepository implements DraftRepository {
 }
 
 const failingSaveAsRepository = (): LibraryRepository => ({
-  listPlans: async () => [],
+  listActionFeedback: async () => [],  saveActionFeedback: async () => { throw new Error('not used') },  removeActionFeedback: async () => {},  listPlans: async () => [],
   listRecords: async () => [],
   loadProfile: async () => null,
   loadPreferences: async () => null,
@@ -43,7 +43,7 @@ const failingSaveAsRepository = (): LibraryRepository => ({
 })
 
 const quickPlanRepository = (): LibraryRepository => ({
-  listPlans: async () => [],
+  listActionFeedback: async () => [],  saveActionFeedback: async () => { throw new Error('not used') },  removeActionFeedback: async () => {},  listPlans: async () => [],
   listRecords: async () => [],
   loadProfile: async () => null,
   loadPreferences: async () => null,
@@ -222,7 +222,7 @@ describe('方案草稿保存状态', () => {
     await flushPromises()
 
     expect(draft.items).toHaveLength(3)
-    expect(wrapper.text()).toContain('这个方案不是 AI 分析结果')
+    expect(wrapper.text()).toContain('这些示例不是 AI 分析结果')
   })
 
   it('rejects an empty plan title without leaving a hidden stale value', async () => {
@@ -295,8 +295,8 @@ describe('方案草稿保存状态', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.get('.operation-error[role="alert"]').text()).toContain('另存为没有成功')
-    expect(wrapper.get('button[aria-label="重试另存为"]')).toBeTruthy()
+    expect(wrapper.get('.operation-error[role="alert"]').text()).toContain('复制方案没有成功')
+    expect(wrapper.get('button[aria-label="重试复制方案"]')).toBeTruthy()
     expect(wrapper.text()).not.toContain('indexeddb transaction failed')
   })
 
@@ -356,7 +356,7 @@ describe('方案草稿保存状态', () => {
     expect(document.activeElement).toBe(card.element)
   })
 
-  it('marks uncertain actions, confirms them in the sheet, and restores focus', async () => {
+  it.each([false, true])('separates pending actions and restores review focus when saving fails: %s', async (failSaving) => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const repository = new RecoverableDraftRepository()
@@ -389,7 +389,10 @@ describe('方案草稿保存状态', () => {
       global: { plugins: [pinia, router] },
     })
 
-    const trigger = wrapper.get<HTMLButtonElement>('.action-summary')
+    expect(wrapper.get('[aria-label="方案摘要"]').text()).toContain('0 个可训练动作')
+    expect(wrapper.get('[aria-label="开练前核对"]').text()).toContain('1 个动作待确认，暂不进入训练')
+    const trigger = wrapper.get<HTMLButtonElement>('.pending-review-list button')
+    expect(trigger.text()).toContain('疑似弯举')
     expect(wrapper.get('.pending-badge').text()).toBe('待确认')
     expect(wrapper.get('.start-training-panel button').attributes('disabled')).toBeDefined()
     await trigger.trigger('click')
@@ -403,10 +406,19 @@ describe('方案草稿保存状态', () => {
 
     await trigger.trigger('click')
     await flushPromises()
+    repository.failSave = failSaving
     await wrapper.get('.action-sheet .done').trigger('click')
     await flushPromises()
+    if (failSaving) {
+      expect(wrapper.find('.action-sheet').exists()).toBe(true)
+      await wrapper.get('.action-sheet').trigger('keydown', { key: 'Escape' })
+      await flushPromises()
+    }
     expect(draft.items[0]!.confirmationStatus).toBe('confirmed')
     expect(wrapper.find('.pending-badge').exists()).toBe(false)
+    expect(wrapper.get('[aria-label="方案摘要"]').text()).toContain('1 个可训练动作')
+    expect(wrapper.find('.pending-review-list').exists()).toBe(false)
+    expect(document.activeElement).toBe(wrapper.get('.action-summary').element)
   })
 
   it('starts training with only confirmed actions', async () => {
@@ -490,6 +502,9 @@ describe('方案草稿保存状态', () => {
     await router.isReady()
     const wrapper = mount(PlanDraftView, { global: { plugins: [pinia, router] } })
 
+    expect(wrapper.find('a.original-video-link').exists()).toBe(false)
+    await wrapper.findAll('.action-summary')[0]!.trigger('click')
+    await wrapper.get('[data-full-editor]').trigger('click')
     const links = wrapper.findAll('a.original-video-link')
     expect(links).toHaveLength(1)
     expect(links[0]!.text()).toBe('查看原视频')
@@ -547,9 +562,101 @@ describe('方案草稿保存状态', () => {
 
     expect(wrapper.text()).not.toContain('跟练执行')
     expect(wrapper.text()).not.toContain('教学演示')
+    await wrapper.get('.action-summary').trigger('click')
+    await wrapper.get('[data-full-editor]').trigger('click')
     await wrapper.get('button.local-preview-button').trigger('click')
     await flushPromises()
 
     expect(wrapper.get('video').attributes('src')).toBe('blob:plan-preview')
+  })
+
+  it('previews, applies, and restores a deterministic TrainPal adjustment', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const repository = new RecoverableDraftRepository()
+    repository.failSave = false
+    const draft = useDraftStore()
+    await draft.load(repository)
+    draft.addManualAction({ name: '深蹲', mode: 'reps' })
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/plan', component: PlanDraftView },
+        { path: '/personalize', component: { template: '<p>GYMTI</p>' } },
+      ],
+    })
+    await router.push('/plan')
+    await router.isReady()
+    const wrapper = mount(PlanDraftView, {
+      attachTo: document.body,
+      global: { plugins: [pinia, router] },
+    })
+
+    await wrapper.get('button[data-adjustment-trigger]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="dialog"]').text()).toContain('调整这次训练')
+    await wrapper.get('button[data-adjustment-intent="more_challenging"]').trigger('click')
+    await wrapper.get('button[data-generate-adjustment]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.adjustment-change-list').text()).toContain('10 次 → 12 次')
+    await wrapper.get('button[data-edit-adjustment-intent]').trigger('click')
+    await wrapper.get('button[data-adjustment-intent="easier_to_finish"]').trigger('click')
+    expect(wrapper.find('button[data-apply-adjustment]').exists()).toBe(false)
+    expect(wrapper.find('.adjustment-change-list').exists()).toBe(false)
+    await wrapper.get('button[data-adjustment-intent="more_challenging"]').trigger('click')
+    await wrapper.get('button[data-generate-adjustment]').trigger('click')
+    await wrapper.get('button[data-adjustment-safety-stop]').trigger('click')
+    expect(wrapper.find('button[data-apply-adjustment]').exists()).toBe(false)
+    expect(draft.adjustmentProposal).toBeNull()
+    await wrapper.get('button[data-adjustment-safety-stop]').trigger('click')
+    await wrapper.get('button[data-edit-adjustment-intent]').trigger('click')
+    await wrapper.get('button[data-generate-adjustment]').trigger('click')
+    await flushPromises()
+    await draft.flushPersist()
+    let releaseApply!: () => void
+    const applyWrite = new Promise<void>((resolve) => { releaseApply = resolve })
+    vi.spyOn(repository, 'save').mockImplementationOnce(async (plan) => {
+      await applyWrite
+      repository.value = structuredClone(plan)
+    })
+    await wrapper.get('button[data-apply-adjustment]').trigger('click')
+    await flushPromises()
+    try {
+      expect(draft.adjustmentPending).toBe(true)
+      expect(wrapper.find('button[data-apply-adjustment]').exists()).toBe(false)
+      expect(wrapper.get('button[data-adjustment-trigger]').attributes('disabled')).toBeDefined()
+    } finally {
+      releaseApply()
+      await flushPromises()
+    }
+    expect(draft.items[0]!.reps).toEqual({ value: 12, source: 'personalized' })
+    expect(wrapper.text()).toContain('已为本次训练调整')
+
+    let releaseRestore!: () => void
+    const restoreWrite = new Promise<void>((resolve) => { releaseRestore = resolve })
+    vi.spyOn(repository, 'save').mockImplementationOnce(async (plan) => {
+      await restoreWrite
+      repository.value = structuredClone(plan)
+    })
+    await wrapper.get('button[data-restore-base-plan]').trigger('click')
+    await flushPromises()
+    try {
+      expect(draft.adjustmentPending).toBe(true)
+      expect(wrapper.find('button[data-restore-base-plan]').exists()).toBe(false)
+      expect(wrapper.get('button[data-adjustment-trigger]').attributes('disabled')).toBeDefined()
+    } finally {
+      releaseRestore()
+      await flushPromises()
+    }
+    expect(draft.items[0]!.reps).toEqual({ value: 10, source: 'rule' })
+
+    await wrapper.get('button[data-adjustment-trigger]').trigger('click')
+    await wrapper.get('button[data-adjustment-safety-stop]').trigger('click')
+    await wrapper.get('button[data-adjustment-intent="more_challenging"]').trigger('click')
+    await wrapper.get('button[data-generate-adjustment]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="dialog"]').text()).toContain('有不适时不会生成调整')
+    expect(wrapper.find('.adjustment-change-list').exists()).toBe(false)
   })
 })
