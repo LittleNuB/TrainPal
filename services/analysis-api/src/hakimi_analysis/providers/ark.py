@@ -49,7 +49,7 @@ from hakimi_analysis.providers.visual_parameter_context import (
     repetition_context_instructions,
 )
 from hakimi_analysis.reminders import ReminderRankings, serialize_reminder_input
-from hakimi_analysis.semantic_fusion import ContextualGrouping, SemanticGrouping
+from hakimi_analysis.semantic_fusion import ContextualGrouping, SemanticGroup, SemanticGrouping
 from hakimi_analysis.source_tips import omit_overlong_speech_quotes, safe_tips, speech_quote_tips
 from hakimi_analysis.visual_evidence import (
     ORGANIZING_INSTRUCTIONS,
@@ -106,6 +106,8 @@ class ArkResponsesClient:
         base_url: str,
         http_client: httpx.AsyncClient,
         visual_model_id: str | None = None,
+        fusion_model_id: str | None = None,
+        analysis_response_format: Literal["json_schema", "json_object"] = "json_schema",
         retry_delays: tuple[float, ...] = (1.0, 2.0),
         select_speech_quotes: bool = False,
         visual_parameter_context: bool = False,
@@ -122,6 +124,11 @@ class ArkResponsesClient:
         wire: ResponsesWire | None = None,
     ) -> None:
         self._api_key = api_key
+        if analysis_response_format not in {"json_schema", "json_object"} or (
+            analysis_response_format == "json_object" and wire is not None
+        ):
+            raise ProviderError("configuration_error", "分析输出格式配置无效", retryable=False)
+        self._analysis_response_format = analysis_response_format
         self._visual_parameter_context = visual_parameter_context
         if visual_parameter_context_format not in {"nested", "flat", "flat_branch_source"} or (
             visual_parameter_context_format != "nested" and not visual_parameter_context
@@ -163,6 +170,7 @@ class ArkResponsesClient:
         self._visual_reading_format = visual_reading_format
         self._model_id = model_id
         self._visual_model_id = visual_model_id or model_id
+        self._fusion_model_id = fusion_model_id or model_id
         self._base_url = base_url.rstrip("/")
         self._http_client = http_client
         self._retry_delays = retry_delays
@@ -248,6 +256,7 @@ class ArkResponsesClient:
             ],
             result_type=SemanticGrouping,
             schema_name="semantic_action_grouping",
+            model_id=self._fusion_model_id,
         )
 
     async def group_action_evidence_with_context(
@@ -279,6 +288,7 @@ class ArkResponsesClient:
             ],
             result_type=ContextualGrouping,
             schema_name="contextual_action_grouping",
+            model_id=self._fusion_model_id,
             retry_delays=(),
         )
 
@@ -626,6 +636,11 @@ class ArkResponsesClient:
         evidence_snapshot: VisualEvidenceSnapshot | None = None,
         json_object_wire: bool = False,
     ) -> StructuredResult:
+        analysis_json_object = self._analysis_response_format == "json_object" and result_type in (
+            SpeechUnderstandingResult,
+            VisualLocalizationResult,
+            SemanticGrouping,
+        )
         schema = (
             evidence_snapshot.response_schema()
             if evidence_snapshot is not None
@@ -677,13 +692,20 @@ class ArkResponsesClient:
             "strict": True,
             "schema": schema,
         }
-        if json_object_wire:
-            # Explicit reading-only trial: syntax mode does not relax the local schema.
-            assert strict_wire and result_type in (VisualCaptionTimeline, PointCapableTimeline)
-            instructions += (
-                "\n只输出一个合法JSON对象，不使用Markdown。输出必须满足以下JSON Schema：\n"
-                + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
-            )
+        if json_object_wire or analysis_json_object:
+            # Explicit JSON mode retains the same locally validated schema.
+            if json_object_wire:
+                assert strict_wire and result_type in (VisualCaptionTimeline, PointCapableTimeline)
+            if analysis_json_object:
+                instructions += (
+                    "\n只输出一个完整合法JSON对象，必须满足以下结构，不输出Markdown或额外解释：\n"
+                    + json.dumps(schema, ensure_ascii=False)
+                )
+            else:
+                instructions += (
+                    "\n只输出一个合法JSON对象，不使用Markdown。输出必须满足以下JSON Schema：\n"
+                    + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+                )
             response_format = {"type": "json_object"}
         body: dict[str, Any] = {
             "model": model_id or self._model_id,
@@ -715,9 +737,30 @@ class ArkResponsesClient:
             request_id = str(payload.get("id")) if payload.get("id") else None
             if self._wire is not None:
                 self._wire.validate_response(payload)
-            elif flat_context or strict_wire:
+            elif flat_context or strict_wire or analysis_json_object:
                 validate_flat_response_metadata(payload, response_format)
             text = self._output_text(payload)
+            if analysis_json_object:
+                decoded = json.loads(text, parse_constant=reject_non_json_constant)
+                if result_type is SpeechUnderstandingResult and quote_sources is None:
+                    decoded = omit_overlong_speech_quotes(decoded)
+                if result_type is SemanticGrouping and isinstance(decoded, dict):
+                    groups = decoded.get("groups")
+                    if isinstance(groups, list):
+                        for group in groups:
+                            if isinstance(group, dict):
+                                group["accepted_tip_ids"] = (
+                                    SemanticGroup.isolate_invalid_tip_selection(
+                                        group.get("accepted_tip_ids")
+                                    )
+                                )
+                try:
+                    Draft202012Validator(schema).validate(decoded)
+                except JsonSchemaValidationError:
+                    raise ValueError("analysis_schema_invalid") from None
+                if quote_sources is not None:
+                    decoded = restore_selected_quotes(decoded, quote_sources)
+                return result_type.model_validate(decoded)
             if strict_wire or self._wire is not None:
                 decoded = json.loads(text, parse_constant=reject_non_json_constant)
                 receiving_schema = schema
@@ -745,7 +788,7 @@ class ArkResponsesClient:
                 return result_type.model_validate(omit_overlong_speech_quotes(decoded))
             return result_type.model_validate_json(text)
         except (ValueError, TypeError, ValidationError) as error:
-            if strict_wire:
+            if strict_wire or analysis_json_object:
                 raise ProviderSchemaError(
                     f"{provider_label}证据返回格式无效", request_id=request_id
                 ) from None

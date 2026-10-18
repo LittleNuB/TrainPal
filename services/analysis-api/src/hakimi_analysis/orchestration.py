@@ -762,7 +762,7 @@ class OrchestratedAnalysisPipeline:
             "branch.completed",
             {"branch": "speech", "evidence_count": len(result.signals)},
         )
-        return [signal for signal in result.signals if signal.is_training_content]
+        return [signal for signal in result.signals if signal.is_action_requirement]
 
 
 def _covered_seconds(windows: list[AnalysisWindow]) -> float:

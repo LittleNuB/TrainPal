@@ -56,6 +56,16 @@ Copy-Item .env.example .env.local
 
 在 .env.local 配置 ARK_API_KEY、VOLC_ASR_API_KEY 与对应模型，并准备 FFmpeg；配置项见 [.env.example](.env.example)。GYMTI 的模型增强使用其中独立的 GYMTI 配置。
 
+以下本地配置已完成一次 68 秒视频的真实模型全流程，重复分析仍有格式失败，尚未作为稳定推荐配置。可在 .env.local 显式选择；它保持现有 Ark 服务商，仓库默认配置不自动切换。
+
+~~~dotenv
+ARK_MODEL_ID=doubao-seed-2-1-pro-260915
+ARK_VISUAL_MODEL_ID=doubao-seed-2-1-pro-260915
+ARK_ANALYSIS_RESPONSE_FORMAT=json_object
+~~~
+
+这次视频复测保留了两个热身、四个正式动作和一项可选有氧，排除了片头背景和片尾回顾重复；缺少参数或示范依据的项目仍待确认。完整过程见 [真实验收记录](docs/design/trainpal-real-ai-acceptance-20261019.md)。
+
 运行包含视频分析、AI 个性化调整、语音片段查找和训练提醒编排的本地完整体验：
 
 ~~~powershell
@@ -85,7 +95,7 @@ pnpm test:e2e
 
 pnpm check 包含 lint、类型检查、单元测试和生产构建。E2E 覆盖完整旅程、响应式布局、键盘与可访问性，使用合成媒体和测试 Provider。真实模型质量和真人麦克风结果单独记录。
 
-[本轮整合与验收记录](docs/design/trainpal-product-integration-20261018.md) · [B 入口设计决策](docs/adr/0088-cat-voice-entry-and-product-integration.md) · [领域词汇](CONTEXT.md)
+[真实模型与视频验收记录](docs/design/trainpal-real-ai-acceptance-20261019.md) · [本轮整合与验收记录](docs/design/trainpal-product-integration-20261018.md) · [B 入口设计决策](docs/adr/0088-cat-voice-entry-and-product-integration.md) · [领域词汇](CONTEXT.md)
 
 | 目录 | 内容 |
 | --- | --- |

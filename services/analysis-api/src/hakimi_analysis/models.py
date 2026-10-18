@@ -188,6 +188,19 @@ class SpeechSignal(StrictModel):
     evidence_text: str = Field(min_length=1)
     segment_role: SegmentRole = SegmentRole.UNKNOWN
     is_training_content: bool = True
+    content_scope: Literal["individual_action", "general_context"] = "individual_action"
+
+    @property
+    def is_action_requirement(self) -> bool:
+        """General narration is context; explicit prescriptions and paced work remain actions."""
+        return self.is_training_content and (
+            self.content_scope == "individual_action"
+            or self.segment_role == SegmentRole.FOLLOW_ALONG
+            or any(
+                value is not None
+                for value in (self.sets, self.reps, self.duration_seconds, self.rest_seconds)
+            )
+        )
 
 
 class SpeechUnderstandingResult(StrictModel):

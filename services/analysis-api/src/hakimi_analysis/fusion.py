@@ -245,7 +245,9 @@ def fuse_candidates(
 ) -> list[AnalysisCandidate]:
     candidates: list[AnalysisCandidate] = []
     matched_visual_indexes: set[int] = set()
-    speech_signals = _deduplicate_speech_signals(speech_signals)
+    speech_signals = _deduplicate_speech_signals(
+        [signal for signal in speech_signals if signal.is_action_requirement]
+    )
 
     for speech in speech_signals:
         matches = [

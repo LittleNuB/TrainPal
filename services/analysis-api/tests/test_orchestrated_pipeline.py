@@ -640,7 +640,7 @@ def test_long_video_retains_configured_chunk_coverage() -> None:
 def test_skill_repository_loads_all_three_versioned_contracts() -> None:
     repository = SkillRepository.load(Path(__file__).parents[3] / "skills")
 
-    assert repository.speech_version == "2.0.0"
+    assert repository.speech_version == "2.1.0"
     assert repository.visual_version == "1.8.0"
     assert repository.fusion_version == "2.7.0"
     assert "continuous video clip" in repository.visual_instructions

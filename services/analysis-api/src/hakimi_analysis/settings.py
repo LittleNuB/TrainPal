@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     ark_api_key: SecretStr | None = None
     ark_model_id: str = "doubao-seed-2-0-mini-260428"
     ark_visual_model_id: str = "doubao-seed-2-0-mini-260428"
+    ark_fusion_model_id: str | None = Field(default=None, min_length=1)
+    ark_analysis_response_format: Literal["json_schema", "json_object"] = "json_schema"
     ark_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
     volc_asr_api_key: SecretStr | None = None
     volc_asr_resource_id: str = "volc.seedasr.sauc.duration"

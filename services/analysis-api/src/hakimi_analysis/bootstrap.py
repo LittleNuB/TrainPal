@@ -164,6 +164,8 @@ def build_pipeline(
         api_key=settings.ark_api_key.get_secret_value(),
         model_id=settings.ark_model_id,
         visual_model_id=settings.ark_visual_model_id,
+        fusion_model_id=settings.ark_fusion_model_id,
+        analysis_response_format=settings.ark_analysis_response_format,
         base_url=settings.ark_base_url,
         http_client=http_client,
     )

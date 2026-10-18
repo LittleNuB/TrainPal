@@ -162,7 +162,7 @@ def _observations(
 ) -> list[_Observation]:
     result = []
     for index, signal in enumerate(speech, 1):
-        if signal.is_training_content:
+        if signal.is_action_requirement:
             candidate = fuse_candidates(
                 source_id=source_id,
                 speech_signals=[signal],

@@ -1,6 +1,6 @@
 ---
 name: training-speech-understanding
-version: 2.0.0
+version: 2.1.0
 description: Extract all explicit training-action signals from full-source timestamped speech.
 ---
 
@@ -38,12 +38,21 @@ Return JSON only:
       "tips": [],
       "segment_role": "follow_along | teaching_demo | unknown",
       "is_training_content": true
+      ,"content_scope": "individual_action"
     }
   ]
 }
 ```
 
 ## Rules
+
+- `content_scope` 区分独立执行与上下文：`individual_action` 是有具体动作方式，
+  或本身具有明确独立执行时长/次数的活动；`general_context` 是阶段目的、章节概括
+  或器械建议，没有说明具体怎么动，也没有独立执行要求。与训练相关不等于另一个动作。
+  概括多个器械用于同一准备阶段的原话，如果没有逐个说明动作，不要拼成一个组合动作
+  或猜出细分动作；保留完整原话但标 `general_context`。真实连续组合动作、明确的独立
+  轮次与有明确时长的附加活动仍为 `individual_action`。概括说明仅作完整来源上下文，
+  不编译为独立执行；不能通过此分类省略来源明确的参数或同步跟练要求。
 
 - 每条 signal 对应一个动作或一种明确的活动。原句并列介绍几个独立动作时分别提取，
   可以引用同一完整语句时间，不猜测各自更细的起止点，不把并列名称拼成新动作。
