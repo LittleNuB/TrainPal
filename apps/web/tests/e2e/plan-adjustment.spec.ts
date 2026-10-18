@@ -1,3 +1,4 @@
+import { mockModelAdjustment } from './model-adjustment-fixture'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 
@@ -35,3 +36,5 @@ test(`TrainPal previews and applies confirmed changes at ${width}px`, async ({ p
   await expect(page.locator('.action-summary').first()).toContainText('每组 30 秒')
 })
 }
+
+test.beforeEach(async ({ page }) => { await mockModelAdjustment(page) })

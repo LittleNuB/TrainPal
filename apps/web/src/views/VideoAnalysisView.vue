@@ -323,10 +323,10 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
       </section>
 
       <section v-else-if="hasProposal" class="completion-card tp-card" aria-labelledby="completion-title">
-        <div class="completion-mark" aria-hidden="true">✓</div>
+        <div class="completion-mark" aria-hidden="true">{{ analysis.coverageGaps.length ? '…' : '✓' }}</div>
         <div class="completion-copy">
           <p class="tp-kicker">分析结果</p>
-          <h2 id="completion-title">训练方案已准备好</h2>
+          <h2 id="completion-title">{{ analysis.coverageGaps.length ? '还有片段未完成' : '训练方案已准备好' }}</h2>
           <p>
             找到 {{ analysis.candidates.length }} 个动作。
             <template v-if="reliableCount">{{ reliableCount }} 个可以直接训练</template><template v-else>都需要你先确认</template><template v-if="pendingCandidates.length">，{{ pendingCandidates.length }} 个会在方案中标记为待确认</template>。
@@ -350,7 +350,7 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
         <section v-if="analysis.coverageGaps.length" class="coverage-gaps" aria-labelledby="coverage-title">
           <div>
             <strong id="coverage-title">还有 {{ analysis.coverageGaps.length }} 段未能识别</strong>
-            <p>已识别动作仍可进入方案；缺口不会伪装成动作。</p>
+            <p>可以重试这些片段，或先查看已识别的动作。</p>
           </div>
           <article v-for="gap in analysis.coverageGaps" :key="`${gap.start_seconds}-${gap.end_seconds}`">
             <span>{{ formatTime(gap.start_seconds) }}—{{ formatTime(gap.end_seconds) }}</span>

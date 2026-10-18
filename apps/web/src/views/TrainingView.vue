@@ -255,7 +255,7 @@ const syncVideo = async (): Promise<void> => {
     && !training.commandLocked
     && element.currentTime < range.end_seconds
   ) {
-    await element.play().catch(() => undefined)
+    void element.play().catch(() => undefined)
   } else {
     element.pause()
   }

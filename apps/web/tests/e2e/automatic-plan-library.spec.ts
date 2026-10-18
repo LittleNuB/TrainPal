@@ -1,3 +1,4 @@
+import { mockModelAdjustment } from './model-adjustment-fixture'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 
@@ -223,3 +224,5 @@ test('copy creates a separate archive and deleting the active copy does not recr
   await expect(page.locator('.saved-row')).toHaveCount(1)
   await expect(page.locator('.saved-row')).not.toContainText('周末方案副本')
 })
+
+test.beforeEach(async ({ page }) => { await mockModelAdjustment(page) })

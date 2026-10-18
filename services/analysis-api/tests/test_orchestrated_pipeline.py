@@ -24,6 +24,7 @@ from hakimi_analysis.orchestration import (
     SkillRepository,
     build_visual_chunks,
 )
+from hakimi_analysis.pipeline import PipelineFailure
 from hakimi_analysis.providers.ark import ArkResponsesClient
 from hakimi_analysis.providers.base import ProviderError
 from hakimi_analysis.runs import AnalysisRunManager
@@ -87,6 +88,60 @@ async def test_pipeline_publishes_the_semantically_grouped_result(tmp_path: Path
     assert len(result.candidates) == 1
     assert result.candidates[0].name == "哑铃拖拽弯举"
     assert [span.type for span in result.candidates[0].evidence] == ["speech", "visual"]
+
+
+@pytest.mark.parametrize("failure", ["timeout", "membership", "reference"])
+async def test_failed_fusion_never_publishes_raw_observations_as_completed_actions(
+    tmp_path: Path,
+    failure: str,
+) -> None:
+    async def respond(_: httpx.Request) -> httpx.Response:
+        if failure == "timeout":
+            await asyncio.sleep(1)
+        groups = (
+            []
+            if failure == "membership"
+            else [
+                {
+                    "member_ids": ["speech-1", "visual-1"],
+                    "name": "合成动作",
+                    "relation": "same_demonstration",
+                    "content_role": "recap",
+                    "related_member_id": "missing",
+                },
+            ]
+        )
+        return httpx.Response(200, json={"output_text": json.dumps({"groups": groups})})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        media = FakeMediaProcessor(tmp_path)
+        pipeline = OrchestratedAnalysisPipeline(
+            media=media,
+            asr=FakeAsr(),
+            ark=FakeArk(),
+            skills=SkillRepository("speech", "1", "visual", "1", "fusion", "2"),
+            semantic_fusion=SemanticCandidateFusion(
+                model=ArkResponsesClient(
+                    api_key="test", model_id="text", base_url="https://ark.test", http_client=client
+                ),
+                instructions="group evidence",
+                timeout_seconds=0.01,
+            ),
+        )
+
+        async def emit(_stage: RunStage, _event: str, _data: dict[str, object]) -> None:
+            pass
+
+        with pytest.raises(PipelineFailure, match="动作整理") as error:
+            await pipeline.analyze(
+                VideoSource(
+                    id="test", title="fixture", path=tmp_path / "fixture.mp4", duration_seconds=60
+                ),
+                None,
+                emit,
+            )
+        assert error.value.retryable
+        assert media.exited.is_set()
 
 
 class FakeMediaProcessor:
@@ -211,29 +266,55 @@ class FailingAsr(FakeAsr):
 @pytest.mark.parametrize("speech_failed", [True, False])
 @pytest.mark.parametrize("upstream_excluded", [True, False])
 async def test_no_training_after_semantic_filtering_keeps_speech_failure_distinct_from_empty(
-    tmp_path: Path, speech_failed: bool, upstream_excluded: bool,
+    tmp_path: Path,
+    speech_failed: bool,
+    upstream_excluded: bool,
 ) -> None:
     class EndingGestureArk(FakeArk):
         async def locate_visual(self, **kwargs: object) -> VisualLocalizationResult:
-            return VisualLocalizationResult(segments=[VisualSegment(
-                action_name="挥手", start_seconds=1, end_seconds=3,
-                visual_cue="结尾挥手告别，没有训练动作",
-                is_training_content=not upstream_excluded,
-            )])
+            return VisualLocalizationResult(
+                segments=[
+                    VisualSegment(
+                        action_name="挥手",
+                        start_seconds=1,
+                        end_seconds=3,
+                        visual_cue="结尾挥手告别，没有训练动作",
+                        is_training_content=not upstream_excluded,
+                    )
+                ]
+            )
 
-    async with httpx.AsyncClient(transport=httpx.MockTransport(
-        lambda _: httpx.Response(200, json={"output_text": json.dumps({"groups": [{
-            "member_ids": ["visual-1"], "name": None, "relation": "same_demonstration",
-            "content_role": "non_training_gesture", "related_member_id": None,
-        }]})}),
-    )) as client:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={
+                    "output_text": json.dumps(
+                        {
+                            "groups": [
+                                {
+                                    "member_ids": ["visual-1"],
+                                    "name": None,
+                                    "relation": "same_demonstration",
+                                    "content_role": "non_training_gesture",
+                                    "related_member_id": None,
+                                }
+                            ]
+                        }
+                    )
+                },
+            ),
+        )
+    ) as client:
         pipeline = OrchestratedAnalysisPipeline(
             media=FakeMediaProcessor(tmp_path),
             asr=FailingAsr() if speech_failed else EmptyAsr(),
-            ark=EndingGestureArk(), skills=skills(),
+            ark=EndingGestureArk(),
+            skills=skills(),
             semantic_fusion=SemanticCandidateFusion(
-                model=ArkResponsesClient(api_key="test", model_id="text",
-                                         base_url="https://ark.test", http_client=client),
+                model=ArkResponsesClient(
+                    api_key="test", model_id="text", base_url="https://ark.test", http_client=client
+                ),
                 instructions="fixture",
             ),
         )
@@ -243,8 +324,9 @@ async def test_no_training_after_semantic_filtering_keeps_speech_failure_distinc
         assert output.coverage_status == CoverageStatus.INSUFFICIENT
         assert output.empty_reason == "insufficient_evidence"
         assert output.processed_seconds == 0
-        assert [(gap.start_seconds, gap.end_seconds, gap.retryable)
-                for gap in output.coverage_gaps] == [(0, source(tmp_path).duration_seconds, True)]
+        assert [
+            (gap.start_seconds, gap.end_seconds, gap.retryable) for gap in output.coverage_gaps
+        ] == [(0, source(tmp_path).duration_seconds, True)]
         assert [warning.code for warning in output.warnings] == ["speech_unavailable"]
     else:
         assert output.coverage_status == CoverageStatus.COMPLETE
@@ -542,12 +624,25 @@ def test_visual_chunk_windows_cover_the_complete_source_with_bounded_overlap() -
     ]
 
 
+@pytest.mark.parametrize("duration", [68, 90])
+def test_short_video_keeps_intro_and_recap_in_one_visual_context(duration: float) -> None:
+    assert build_visual_chunks(
+        duration, chunk_seconds=60, overlap_seconds=10, short_context_seconds=90
+    ) == [AnalysisWindow(start_seconds=0, end_seconds=duration, expanded=False)]
+
+
+def test_long_video_retains_configured_chunk_coverage() -> None:
+    assert build_visual_chunks(
+        130, chunk_seconds=60, overlap_seconds=10, short_context_seconds=90
+    ) == build_visual_chunks(130, chunk_seconds=60, overlap_seconds=10)
+
+
 def test_skill_repository_loads_all_three_versioned_contracts() -> None:
     repository = SkillRepository.load(Path(__file__).parents[3] / "skills")
 
-    assert repository.speech_version == "1.7.0"
-    assert repository.visual_version == "1.6.2"
-    assert repository.fusion_version == "2.5.0"
+    assert repository.speech_version == "2.1.0"
+    assert repository.visual_version == "1.8.0"
+    assert repository.fusion_version == "2.7.0"
     assert "continuous video clip" in repository.visual_instructions
     assert "clip-local" in repository.visual_instructions
     assert "contact sheet" not in repository.visual_instructions.casefold()

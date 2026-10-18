@@ -183,6 +183,23 @@ const mountTraining = async (pinia: ReturnType<typeof createPinia>) => {
 }
 
 describe('训练页合同', () => {
+  it('keeps training controls available while reference video playback is pending', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const current = trainingSession('paused')
+    current.plan.items[0]!.sourceRef = { sourceId: source.id }
+    current.plan.items[0]!.segment = { value: { start_seconds: 5, end_seconds: 12 }, source: 'video' }
+    useAnalysisStore().sources = [source]
+    const engine = new SessionEngine(current)
+    await useTrainingStore().load(engine)
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => new Promise(() => {}))
+    const wrapper = await mountTraining(pinia)
+    await wrapper.get('button.primary-action').trigger('click')
+    await flushPromises()
+    expect(engine.commands.some(command => command.type === 'set.start')).toBe(true)
+    expect(wrapper.get('button.pause-training').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
   it.each(['hidden', 'pagehide', 'route'])('pauses a late preparation commit after %s', async (leave) => {
     const pinia = createPinia()
     setActivePinia(pinia)

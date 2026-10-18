@@ -14,6 +14,14 @@ import { useTrainingStore } from '@/stores/training'
 import type { TrainingCommand, TrainingEngine, TrainingEngineResult } from '@/training/training-engine'
 import PlanDraftView from '@/views/PlanDraftView.vue'
 
+vi.mock('@/api/adjustment-client', async () => {
+  const { proposePlanAdjustment } = await import('@/personalization/adjustment-policy')
+  return { requestPlanAdjustment: vi.fn(async (input) => ({
+    ...proposePlanAdjustment(input), policyVersion: 'adjustment-policy.v3', origin: 'model',
+    summary: '合成测试建议',
+  })) }
+})
+
 class RecoverableDraftRepository implements DraftRepository {
   failSave = true
   value: DraftPlan | undefined
@@ -598,6 +606,7 @@ describe('方案草稿保存状态', () => {
     await wrapper.get('button[data-adjustment-intent="more_challenging"]').trigger('click')
     await wrapper.get('button[data-generate-adjustment]').trigger('click')
     await flushPromises()
+    await flushPromises()
 
     expect(wrapper.get('.adjustment-change-list').text()).toContain('10 次 → 12 次')
     await wrapper.get('button[data-edit-adjustment-intent]').trigger('click')
@@ -606,12 +615,14 @@ describe('方案草稿保存状态', () => {
     expect(wrapper.find('.adjustment-change-list').exists()).toBe(false)
     await wrapper.get('button[data-adjustment-intent="more_challenging"]').trigger('click')
     await wrapper.get('button[data-generate-adjustment]').trigger('click')
+    await flushPromises()
     await wrapper.get('button[data-adjustment-safety-stop]').trigger('click')
     expect(wrapper.find('button[data-apply-adjustment]').exists()).toBe(false)
     expect(draft.adjustmentProposal).toBeNull()
     await wrapper.get('button[data-adjustment-safety-stop]').trigger('click')
     await wrapper.get('button[data-edit-adjustment-intent]').trigger('click')
     await wrapper.get('button[data-generate-adjustment]').trigger('click')
+    await flushPromises()
     await flushPromises()
     await draft.flushPersist()
     let releaseApply!: () => void
@@ -655,6 +666,7 @@ describe('方案草稿保存状态', () => {
     await wrapper.get('button[data-adjustment-safety-stop]').trigger('click')
     await wrapper.get('button[data-adjustment-intent="more_challenging"]').trigger('click')
     await wrapper.get('button[data-generate-adjustment]').trigger('click')
+    await flushPromises()
     await flushPromises()
     expect(wrapper.get('[role="dialog"]').text()).toContain('有不适时不会生成调整')
     expect(wrapper.find('.adjustment-change-list').exists()).toBe(false)

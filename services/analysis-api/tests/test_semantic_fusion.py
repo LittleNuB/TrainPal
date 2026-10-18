@@ -4,9 +4,115 @@ import json
 import httpx
 import pytest
 
-from hakimi_analysis.models import CandidateParameters, SegmentRole, SpeechSignal, VisualSegment
+from hakimi_analysis.models import (
+    CandidateParameters,
+    EvidenceSpan,
+    ParameterAlternative,
+    SegmentRole,
+    SpeechSignal,
+    TranscriptUtterance,
+    VisualSegment,
+)
 from hakimi_analysis.providers.ark import ArkResponsesClient
 from hakimi_analysis.semantic_fusion import SemanticCandidateFusion
+from hakimi_analysis.shared_source_context import SpeechSourceContext
+from hakimi_analysis.visual_evidence import EvidenceVisualSegment
+
+
+@pytest.mark.parametrize(
+    "protected",
+    ["none", "follow_along", "parameters", "conflicting_claims", "heading", "no_context"],
+)
+async def test_background_display_needs_context_and_preserves_training_evidence(
+    protected: str,
+) -> None:
+    visual = [
+        VisualSegment(
+            action_name="器械展示",
+            start_seconds=0,
+            end_seconds=3,
+            visual_cue="介绍环境时坐在器械上",
+        )
+    ]
+    if protected == "follow_along":
+        visual[0].segment_role = SegmentRole.FOLLOW_ALONG
+    if protected == "parameters":
+        visual[0].text_parameters = CandidateParameters(sets=3)
+    if protected == "heading":
+        visual[0].sequence_label = "动作一"
+    if protected == "conflicting_claims":
+        visual[0] = EvidenceVisualSegment(
+            **visual[0].model_dump(),
+            evidence_incomplete=False,
+            parameter_claims=[
+                ParameterAlternative(
+                    parameters=CandidateParameters(sets=sets),
+                    evidence=[EvidenceSpan(type="visual", start_seconds=0, end_seconds=3)],
+                )
+                for sets in (3, 4)
+            ],
+        )
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(json.loads(request.content)["input"][0]["content"][0]["text"])
+        if protected != "no_context":
+            assert (
+                payload["source_context"]["utterances"][0]["text"]
+                == "先介绍场地，接下来再开始训练。"
+            )
+        return httpx.Response(
+            200,
+            json={
+                "output_text": json.dumps(
+                    {
+                        "groups": [
+                            {
+                                "member_ids": ["visual-1"],
+                                "name": None,
+                                "relation": "same_demonstration",
+                                "content_role": "background_display",
+                                "related_member_id": None,
+                            }
+                        ]
+                    }
+                )
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        fusion = SemanticCandidateFusion(
+            model=ArkResponsesClient(
+                api_key="test", model_id="test", base_url="https://ark.test", http_client=client
+            ),
+            instructions="Group supplied evidence",
+            include_speech_context=True,
+        )
+        result = await fusion.run(
+            source_id="synthetic",
+            speech_signals=[],
+            visual_segments=visual,
+            speech_context=None
+            if protected == "no_context"
+            else SpeechSourceContext.bind(
+                source_id="synthetic",
+                speech_signals=[],
+                visual_segments=visual,
+                utterances=[
+                    TranscriptUtterance(
+                        text="先介绍场地，接下来再开始训练。", start_seconds=0, end_seconds=3
+                    )
+                ],
+            ),
+        )
+    if protected == "none":
+        assert result.candidates == []
+    else:
+        assert len(result.candidates) == 1
+        assert result.candidates[0].needs_confirmation
+        if protected == "conflicting_claims":
+            assert {
+                a.parameters.sets for a in result.candidates[0].parameter_conflicts[0].alternatives
+            } == {3, 4}
 
 
 @pytest.mark.asyncio
@@ -123,7 +229,8 @@ async def test_semantic_fusion_unites_different_names_and_preserves_both_sources
         body = json.loads(request.content)
         assert body["store"] is False
         assert [part["type"] for part in body["input"][0]["content"]] == ["input_text"]
-        assert "private transcript fragment" not in request.content.decode()
+        payload = json.loads(body["input"][0]["content"][0]["text"])
+        assert payload["observations"][0]["description"] == "同一动作的合成来源短句"
         return httpx.Response(
             200,
             json={
@@ -158,7 +265,7 @@ async def test_semantic_fusion_unites_different_names_and_preserves_both_sources
                     action_name="俯卧撑",
                     start_seconds=11,
                     end_seconds=19,
-                    evidence_text="private transcript fragment",
+                    evidence_text="同一动作的合成来源短句",
                     reps=12,
                     sets=3,
                     segment_role=SegmentRole.TEACHING_DEMO,

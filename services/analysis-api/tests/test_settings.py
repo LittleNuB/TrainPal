@@ -37,6 +37,7 @@ def test_analysis_evidence_budget_has_a_bounded_positive_default() -> None:
     assert settings.analysis_evidence_timeout_seconds == 170.0
     assert settings.analysis_chunk_timeout_seconds == 20.0
     assert settings.analysis_visual_chunk_seconds == 60.0
+    assert settings.analysis_visual_short_context_seconds == 0.0
     assert settings.analysis_visual_overlap_seconds == 10.0
     assert settings.analysis_latency_target_max_seconds_per_video_minute == 15.0
 

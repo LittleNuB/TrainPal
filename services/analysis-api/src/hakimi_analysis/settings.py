@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     ark_api_key: SecretStr | None = None
     ark_model_id: str = "doubao-seed-2-0-mini-260428"
     ark_visual_model_id: str = "doubao-seed-2-0-mini-260428"
+    ark_fusion_model_id: str | None = Field(default=None, min_length=1)
+    ark_analysis_response_format: Literal["json_schema", "json_object"] = "json_schema"
     ark_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
     volc_asr_api_key: SecretStr | None = None
     volc_asr_resource_id: str = "volc.seedasr.sauc.duration"
@@ -55,6 +57,7 @@ class Settings(BaseSettings):
     analysis_chunk_timeout_seconds: float = Field(default=20.0, gt=0)
     analysis_visual_chunk_seconds: float = Field(default=60.0, gt=0, le=300)
     analysis_visual_overlap_seconds: float = Field(default=10.0, ge=0)
+    analysis_visual_short_context_seconds: float = Field(default=0.0, ge=0, le=90)
     analysis_latency_target_max_seconds_per_video_minute: float = Field(default=15.0, gt=0)
     gymti_contract_path: Path = PROJECT_ROOT / "contracts" / "gymti-questionnaire.v1.json"
     gymti_llm_api_key: SecretStr | None = None

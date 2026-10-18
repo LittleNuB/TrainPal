@@ -159,6 +159,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plan-adjustments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Propose Plan Adjustment */
+        post: operations["propose_plan_adjustment_api_v1_plan_adjustments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/playback-adjustments": {
         parameters: {
             query?: never;
@@ -530,6 +547,20 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** ModelAdjustmentChange */
+        ModelAdjustmentChange: {
+            /** Action Id */
+            action_id: string;
+            /**
+             * Field
+             * @enum {string}
+             */
+            field: "sets" | "reps" | "durationSeconds" | "restSeconds";
+            /** Reason */
+            reason: string;
+            /** Value */
+            value: number;
+        };
         /** NotReadyResponse */
         NotReadyResponse: {
             /** Code */
@@ -555,6 +586,22 @@ export interface components {
              * @enum {string}
              */
             field: "mode" | "sets" | "reps" | "duration_seconds" | "rest_seconds";
+        };
+        /** PlanAdjustmentResponse */
+        PlanAdjustmentResponse: {
+            /** Changes */
+            changes: components["schemas"]["ModelAdjustmentChange"][];
+            /** Input Fingerprint */
+            input_fingerprint: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "model" | "protected";
+            /** Plan Revision */
+            plan_revision: number;
+            /** Summary */
+            summary: string;
         };
         /** PlaybackChoice */
         PlaybackChoice: {
@@ -1243,6 +1290,104 @@ export interface operations {
             };
         };
     };
+    propose_plan_adjustment_api_v1_plan_adjustments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Actions */
+                    actions: {
+                        /** Confirmed */
+                        confirmed: boolean;
+                        /** AdjustmentValue */
+                        durationSeconds: {
+                            /** Source */
+                            source?: ("video" | "rule" | "personalized" | "user") | null;
+                            /** Value */
+                            value?: number | null;
+                        };
+                        /** Feedback */
+                        feedback?: ("too_hard" | "just_right" | "too_easy") | null;
+                        /** Id */
+                        id: string;
+                        /**
+                         * Mode
+                         * @enum {string}
+                         */
+                        mode: "reps" | "duration";
+                        /** Name */
+                        name: string;
+                        /** AdjustmentValue */
+                        reps: {
+                            /** Source */
+                            source?: ("video" | "rule" | "personalized" | "user") | null;
+                            /** Value */
+                            value?: number | null;
+                        };
+                        /** Reps Range */
+                        reps_range?: [
+                            number,
+                            number
+                        ] | null;
+                        /** AdjustmentValue */
+                        restSeconds: {
+                            /** Source */
+                            source?: ("video" | "rule" | "personalized" | "user") | null;
+                            /** Value */
+                            value?: number | null;
+                        };
+                        /** AdjustmentValue */
+                        sets: {
+                            /** Source */
+                            source?: ("video" | "rule" | "personalized" | "user") | null;
+                            /** Value */
+                            value?: number | null;
+                        };
+                    }[];
+                    /** Available Minutes */
+                    available_minutes?: number | null;
+                    /**
+                     * Energy
+                     * @default usual
+                     * @enum {string}
+                     */
+                    energy?: "usual" | "tired";
+                    /** Experience */
+                    experience?: ("beginner" | "intermediate" | "advanced") | null;
+                    /** Input Fingerprint */
+                    input_fingerprint: string;
+                    /**
+                     * Intent
+                     * @enum {string}
+                     */
+                    intent: "easier_to_finish" | "more_challenging" | "shorter_session";
+                    /** Plan Revision */
+                    plan_revision: number;
+                    /**
+                     * Safety Stop
+                     * @default false
+                     */
+                    safety_stop?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanAdjustmentResponse"];
+                };
+            };
+        };
+    };
     select_playback_api_v1_playback_adjustments_post: {
         parameters: {
             query?: never;
@@ -1395,7 +1540,6 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        /** @description Bounded UTF-8 JSON, at most 64000 bytes; no training-state writes. */
         requestBody: {
             content: {
                 "application/json": {

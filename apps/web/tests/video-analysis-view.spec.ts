@@ -110,6 +110,17 @@ const mountView = async (input?: {
 describe('视频动作分析页', () => {
   afterEach(() => vi.restoreAllMocks())
 
+  it('does not call a partially recognized video a ready training plan', async () => {
+    const { wrapper, analysis } = await mountView()
+    prepareControlledAnalysis(analysis)
+    analysis.candidates = [reliableCandidate()]
+    analysis.coverageStatus = 'partial'
+    analysis.coverageGaps = [{ start_seconds: 0, end_seconds: 10, reason: 'timeout', retryable: true }]
+    await flushPromises()
+    expect(wrapper.get('#completion-title').text()).toBe('还有片段未完成')
+    wrapper.unmount()
+  })
+
   it('shows only the current source, real progress, and cancellation while running', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

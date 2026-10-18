@@ -21,6 +21,7 @@ from hakimi_analysis.models import (
     Segment,
 )
 from hakimi_analysis.orchestration import OrchestratedAnalysisPipeline, SkillRepository
+from hakimi_analysis.personalization import PlanAdjustmentService
 from hakimi_analysis.pipeline import AnalysisPipeline, EmitCallback, PipelineFailure, PipelineOutput
 from hakimi_analysis.playback import PlaybackService
 from hakimi_analysis.providers.ark import ArkResponsesClient
@@ -163,6 +164,8 @@ def build_pipeline(
         api_key=settings.ark_api_key.get_secret_value(),
         model_id=settings.ark_model_id,
         visual_model_id=settings.ark_visual_model_id,
+        fusion_model_id=settings.ark_fusion_model_id,
+        analysis_response_format=settings.ark_analysis_response_format,
         base_url=settings.ark_base_url,
         http_client=http_client,
     )
@@ -175,10 +178,13 @@ def build_pipeline(
         asr=asr,
         ark=ark,
         skills=skills,
-        semantic_fusion=SemanticCandidateFusion(model=ark, instructions=skills.fusion_instructions),
+        semantic_fusion=SemanticCandidateFusion(
+            model=ark, instructions=skills.fusion_instructions, include_speech_context=True,
+        ),
         evidence_timeout_seconds=settings.analysis_evidence_timeout_seconds,
         visual_chunk_timeout_seconds=settings.analysis_chunk_timeout_seconds,
         visual_chunk_seconds=settings.analysis_visual_chunk_seconds,
+        visual_short_context_seconds=settings.analysis_visual_short_context_seconds,
         visual_overlap_seconds=settings.analysis_visual_overlap_seconds,
         run_timeout_seconds=settings.run_timeout_seconds,
     )
@@ -277,6 +283,7 @@ def build_default_app() -> FastAPI:
     )
     return create_app(
         playback_service=build_playback_service(settings, http_client),
+        adjustment_service=build_adjustment_service(settings, http_client),
         catalog=catalog,
         pipeline=build_pipeline(
             settings,
@@ -302,6 +309,22 @@ def build_default_app() -> FastAPI:
         gymti_llm_concurrency=settings.gymti_llm_concurrency,
         release_sha=settings.app_release_sha,
         runtime_cleanup=runtime_cleanup,
+    )
+
+
+def build_adjustment_service(
+    settings: Settings, http_client: httpx.AsyncClient
+) -> PlanAdjustmentService | None:
+    if settings.app_env == "test" or settings.ark_api_key is None:
+        return None
+    return PlanAdjustmentService(
+        ArkResponsesClient(
+            api_key=settings.ark_api_key.get_secret_value(),
+            model_id=settings.ark_model_id,
+            base_url=settings.ark_base_url,
+            http_client=http_client,
+            retry_delays=(),
+        )
     )
 
 

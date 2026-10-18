@@ -801,6 +801,47 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "ModelAdjustmentChange": {
+        "additionalProperties": false,
+        "properties": {
+          "action_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Action Id",
+            "type": "string"
+          },
+          "field": {
+            "enum": [
+              "sets",
+              "reps",
+              "durationSeconds",
+              "restSeconds"
+            ],
+            "title": "Field",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 180,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "value": {
+            "maximum": 86400.0,
+            "minimum": 0.0,
+            "title": "Value",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "action_id",
+          "field",
+          "value",
+          "reason"
+        ],
+        "title": "ModelAdjustmentChange",
+        "type": "object"
+      },
       "NotReadyResponse": {
         "additionalProperties": false,
         "properties": {
@@ -871,6 +912,50 @@
           "alternatives"
         ],
         "title": "ParameterConflict",
+        "type": "object"
+      },
+      "PlanAdjustmentResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/ModelAdjustmentChange"
+            },
+            "maxItems": 200,
+            "title": "Changes",
+            "type": "array"
+          },
+          "input_fingerprint": {
+            "title": "Input Fingerprint",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "model",
+              "protected"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "plan_revision": {
+            "title": "Plan Revision",
+            "type": "integer"
+          },
+          "summary": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "changes",
+          "summary",
+          "input_fingerprint",
+          "plan_revision",
+          "mode"
+        ],
+        "title": "PlanAdjustmentResponse",
         "type": "object"
       },
       "PlaybackChoice": {
@@ -1905,6 +1990,338 @@
         "summary": "Health"
       }
     },
+    "/api/v1/plan-adjustments": {
+      "post": {
+        "operationId": "propose_plan_adjustment_api_v1_plan_adjustments_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "actions": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "confirmed": {
+                          "title": "Confirmed",
+                          "type": "boolean"
+                        },
+                        "durationSeconds": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "source": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "video",
+                                    "rule",
+                                    "personalized",
+                                    "user"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Source"
+                            },
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "maximum": 86400.0,
+                                  "minimum": 0.0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Value"
+                            }
+                          },
+                          "title": "AdjustmentValue",
+                          "type": "object"
+                        },
+                        "feedback": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "too_hard",
+                                "just_right",
+                                "too_easy"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "title": "Feedback"
+                        },
+                        "id": {
+                          "maxLength": 100,
+                          "minLength": 1,
+                          "title": "Id",
+                          "type": "string"
+                        },
+                        "mode": {
+                          "enum": [
+                            "reps",
+                            "duration"
+                          ],
+                          "title": "Mode",
+                          "type": "string"
+                        },
+                        "name": {
+                          "maxLength": 120,
+                          "minLength": 1,
+                          "title": "Name",
+                          "type": "string"
+                        },
+                        "reps": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "source": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "video",
+                                    "rule",
+                                    "personalized",
+                                    "user"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Source"
+                            },
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "maximum": 86400.0,
+                                  "minimum": 0.0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Value"
+                            }
+                          },
+                          "title": "AdjustmentValue",
+                          "type": "object"
+                        },
+                        "reps_range": {
+                          "anyOf": [
+                            {
+                              "maxItems": 2,
+                              "minItems": 2,
+                              "prefixItems": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "integer"
+                                }
+                              ],
+                              "type": "array"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "title": "Reps Range"
+                        },
+                        "restSeconds": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "source": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "video",
+                                    "rule",
+                                    "personalized",
+                                    "user"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Source"
+                            },
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "maximum": 86400.0,
+                                  "minimum": 0.0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Value"
+                            }
+                          },
+                          "title": "AdjustmentValue",
+                          "type": "object"
+                        },
+                        "sets": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "source": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "video",
+                                    "rule",
+                                    "personalized",
+                                    "user"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Source"
+                            },
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "maximum": 86400.0,
+                                  "minimum": 0.0,
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Value"
+                            }
+                          },
+                          "title": "AdjustmentValue",
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "mode",
+                        "confirmed",
+                        "sets",
+                        "reps",
+                        "durationSeconds",
+                        "restSeconds"
+                      ],
+                      "title": "AdjustmentAction",
+                      "type": "object"
+                    },
+                    "maxItems": 100,
+                    "title": "Actions",
+                    "type": "array"
+                  },
+                  "available_minutes": {
+                    "anyOf": [
+                      {
+                        "exclusiveMinimum": 0.0,
+                        "maximum": 1440.0,
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Available Minutes"
+                  },
+                  "energy": {
+                    "default": "usual",
+                    "enum": [
+                      "usual",
+                      "tired"
+                    ],
+                    "title": "Energy",
+                    "type": "string"
+                  },
+                  "experience": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "beginner",
+                          "intermediate",
+                          "advanced"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Experience"
+                  },
+                  "input_fingerprint": {
+                    "maxLength": 100,
+                    "minLength": 1,
+                    "title": "Input Fingerprint",
+                    "type": "string"
+                  },
+                  "intent": {
+                    "enum": [
+                      "easier_to_finish",
+                      "more_challenging",
+                      "shorter_session"
+                    ],
+                    "title": "Intent",
+                    "type": "string"
+                  },
+                  "plan_revision": {
+                    "minimum": 0.0,
+                    "title": "Plan Revision",
+                    "type": "integer"
+                  },
+                  "safety_stop": {
+                    "default": false,
+                    "title": "Safety Stop",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "input_fingerprint",
+                  "plan_revision",
+                  "intent",
+                  "actions"
+                ],
+                "title": "PlanAdjustmentRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanAdjustmentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Propose Plan Adjustment"
+      }
+    },
     "/api/v1/playback-adjustments": {
       "post": {
         "operationId": "select_playback_api_v1_playback_adjustments_post",
@@ -2393,7 +2810,6 @@
               }
             }
           },
-          "description": "Bounded UTF-8 JSON, at most 64000 bytes; no training-state writes.",
           "required": true
         },
         "responses": {

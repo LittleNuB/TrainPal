@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
@@ -37,6 +38,7 @@ from hakimi_analysis.models import (
     VisualLocalizationResult,
     VisualSegment,
 )
+from hakimi_analysis.observability import log_safe_fields
 from hakimi_analysis.pipeline import EmitCallback, PipelineFailure, PipelineOutput
 from hakimi_analysis.providers.base import ProviderError
 from hakimi_analysis.semantic_fusion import SemanticCandidateFusion
@@ -172,11 +174,16 @@ def build_visual_chunks(
     *,
     chunk_seconds: float,
     overlap_seconds: float,
+    short_context_seconds: float = 0,
 ) -> list[AnalysisWindow]:
     if duration_seconds <= 0 or chunk_seconds <= 0:
         raise ValueError("visual chunk durations must be positive")
     if overlap_seconds < 0 or overlap_seconds >= chunk_seconds:
         raise ValueError("visual chunk overlap must be shorter than the chunk")
+    if short_context_seconds < 0:
+        raise ValueError("short context duration must be nonnegative")
+    if duration_seconds <= short_context_seconds:
+        return [AnalysisWindow(start_seconds=0, end_seconds=duration_seconds, expanded=False)]
     windows: list[AnalysisWindow] = []
     start_seconds = 0.0
     while start_seconds < duration_seconds:
@@ -206,6 +213,7 @@ class OrchestratedAnalysisPipeline:
         visual_chunk_timeout_seconds: float = 20,
         visual_chunk_seconds: float = 60,
         visual_overlap_seconds: float = 10,
+        visual_short_context_seconds: float = 0,
         run_timeout_seconds: float = 180,
         completion_margin_seconds: float = 10,
         semantic_fusion: SemanticCandidateFusion | None = None,
@@ -224,6 +232,7 @@ class OrchestratedAnalysisPipeline:
         self._visual_chunk_timeout_seconds = visual_chunk_timeout_seconds
         self._visual_chunk_seconds = visual_chunk_seconds
         self._visual_overlap_seconds = visual_overlap_seconds
+        self._visual_short_context_seconds = visual_short_context_seconds
         if (
             evidence_timeout_seconds <= 0
             or visual_chunk_timeout_seconds <= 0
@@ -240,6 +249,7 @@ class OrchestratedAnalysisPipeline:
             1,
             chunk_seconds=self._visual_chunk_seconds,
             overlap_seconds=self._visual_overlap_seconds,
+            short_context_seconds=self._visual_short_context_seconds,
         )
         self._fusion = CandidateFusionSkill(
             instructions=skills.fusion_instructions,
@@ -276,7 +286,15 @@ class OrchestratedAnalysisPipeline:
                         prepared,
                         emit,
                         deadline=evidence_deadline,
-                        utterances=utterances if self._evidence_first_ark is not None else None,
+                        utterances=utterances
+                        if (
+                            self._evidence_first_ark is not None
+                            or (
+                                self._semantic_fusion is not None
+                                and self._semantic_fusion.includes_speech_context
+                            )
+                        )
+                        else None,
                     )
                 )
                 try:
@@ -396,6 +414,12 @@ class OrchestratedAnalysisPipeline:
                 )
             )
         if isinstance(speech_result, ProviderError):
+            log_safe_fields(
+                logging.getLogger(__name__),
+                source_id=source.id,
+                stage="transcribing",
+                error_code=speech_result.code,
+            )
             warnings.append(
                 AnalysisWarning(
                     code="speech_unavailable",
@@ -410,6 +434,14 @@ class OrchestratedAnalysisPipeline:
                 )
             )
         candidates: list[AnalysisCandidate] = []
+        if self._evidence_first_ark is None and utterances:
+            speech_context = SpeechSourceContext.bind(
+                source_id=source.id,
+                speech_signals=speech_signals,
+                visual_segments=visual_segments,
+                utterances=utterances,
+            )
+            utterances.clear()
         if speech_signals or visual_segments:
             await emit(
                 RunStage.FUSING_CANDIDATES,
@@ -426,6 +458,12 @@ class OrchestratedAnalysisPipeline:
                     visual_context=visual_context,
                     visual_input_binding=visual_input_binding,
                 )
+                if any(code.startswith("unavailable_") for code in fused.diagnostics):
+                    # Raw observations are not actions. A failed grouping must never
+                    # publish a completed plan containing duplicate evidence rows.
+                    raise PipelineFailure(
+                        "provider_error", "动作整理未完成，请重新分析视频", retryable=True
+                    )
                 candidates = fused.candidates
                 warnings.extend(fused.warnings)
             else:
@@ -504,6 +542,7 @@ class OrchestratedAnalysisPipeline:
             source.analysis_duration_seconds,
             chunk_seconds=self._visual_chunk_seconds,
             overlap_seconds=self._visual_overlap_seconds,
+            short_context_seconds=self._visual_short_context_seconds,
         )
         segments: list[VisualSegment] = []
         readings: list[VisualObservation] = []
@@ -653,6 +692,13 @@ class OrchestratedAnalysisPipeline:
                         "evidence_count": len(result.segments),
                     },
                 )
+            if failures and failures[-1][0] == window:
+                log_safe_fields(
+                    logging.getLogger(__name__),
+                    source_id=source.id,
+                    stage="analyzing_evidence",
+                    error_code=failures[-1][1].code,
+                )
             if self._evidence_first_ark is not None and failures:
                 # The pilot requires complete readings; do not buy more unusable evidence.
                 break
@@ -716,7 +762,7 @@ class OrchestratedAnalysisPipeline:
             "branch.completed",
             {"branch": "speech", "evidence_count": len(result.signals)},
         )
-        return [signal for signal in result.signals if signal.is_training_content]
+        return [signal for signal in result.signals if signal.is_action_requirement]
 
 
 def _covered_seconds(windows: list[AnalysisWindow]) -> float:

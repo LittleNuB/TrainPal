@@ -2,7 +2,9 @@
 import SourceTips from '@/features/experience/SourceTips.vue'
 import NumericStepper from '@/components/NumericStepper.vue'
 import { matchingFeedback } from '@/personalization/feedback'
+import { UserMessageError, userMessage } from '@/domain/user-message'
 import { createAdjustmentReview } from '@/personalization/adjustment-review'
+import { fingerprintDraftPlan } from '@/personalization/adjustment-policy'
 import type { AdjustmentReview, TrainingExperience } from '@/domain/personalization'
 import TrainingReminderSettings from '@/features/experience/TrainingReminderSettings.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -94,6 +96,8 @@ const experience = ref<TrainingExperience | null>(library.profile.trainingExperi
 const review = ref<AdjustmentReview | null>(null)
 const generatingAdjustment = ref(false)
 let adjustmentGeneration = 0
+let adjustmentController: AbortController | null = null
+onBeforeUnmount(() => adjustmentController?.abort())
 const expandedReviewId = ref<string | null>(null)
 const experienceLabels = { beginner: '刚开始训练', intermediate: '有一定经验', advanced: '长期规律训练' }
 const feedbackEvidence = computed(() => {
@@ -106,6 +110,12 @@ const feedbackEvidence = computed(() => {
       label: { too_hard: '上次太累', just_right: '上次合适', too_easy: '上次太轻' }[latest.value] }
   }).filter(signal => current.some(entry => entry.itemId === signal.itemId
     && entry.recordedAt === signal.recordedAt && entry.value === signal.value))
+})
+const proposalFeedbackUnavailable = computed(() => {
+  const current = matchingFeedback(draft.plan, library.actionFeedback)
+  return (draft.adjustmentProposal?.context?.signals ?? []).some(signal =>
+    !current.some(entry => entry.itemId === signal.itemId
+      && entry.recordedAt === signal.recordedAt && entry.value === signal.value))
 })
 const contextSummary = computed(() => {
   const context = draft.adjustmentProposal?.context
@@ -270,10 +280,11 @@ const reasonCopy: Record<AdjustmentReasonCode, string> = {
   shorten_time_budget: '优先缩短这次训练的预计用时',
   extend_recovery: '增加恢复时间，不通过压缩休息提高密度',
 }
-const adjustmentReason = (itemId: string, reason: AdjustmentReasonCode): string =>
-  reason === 'increase_after_too_easy' && !feedbackEvidence.value.some(signal => signal.itemId === itemId)
+const adjustmentReason = (itemId: string, reason: AdjustmentReasonCode, explanation?: string): string =>
+  proposalFeedbackUnavailable.value
+    || (reason === 'increase_after_too_easy' && !feedbackEvidence.value.some(signal => signal.itemId === itemId))
     ? '原反馈已更新或清除，请重新生成建议'
-    : reasonCopy[reason]
+    : explanation ?? reasonCopy[reason]
 
 const changeValue = (field: AdjustableField, value: number): string => (
   `${value} ${fieldCopy[field].unit}`
@@ -281,6 +292,8 @@ const changeValue = (field: AdjustableField, value: number): string => (
 
 const openAdjustment = async (event: Event): Promise<void> => {
   adjustmentGeneration += 1
+  adjustmentController?.abort()
+  generatingAdjustment.value = false
   experience.value = library.profile.trainingExperience ?? null
   review.value = null
   expandedItemId.value = null
@@ -289,6 +302,19 @@ const openAdjustment = async (event: Event): Promise<void> => {
   adjustmentNotice.value = ''
   adjustmentSafetyStop.value = false
   adjustmentStep.value = 'intent'
+  const saved = draft.adjustmentProposal
+  if (saved?.policyVersion === 'adjustment-policy.v3'
+    && (saved.origin === 'model' || saved.origin === 'protected')
+    && ['ready', 'no_change'].includes(saved.status)
+    && saved.basePlanRevision === (draft.plan.revision ?? 0)
+    && saved.basePlanFingerprint === fingerprintDraftPlan(draft.plan)) {
+    availableMinutes.value = saved.context?.availableMinutes ?? null
+    energy.value = saved.context?.energy ?? 'usual'
+    review.value = createAdjustmentReview(saved)
+    expandedReviewId.value = saved.changes[0]?.itemId ?? null
+    adjustmentStep.value = 'preview'
+    if (saved.status === 'no_change') adjustmentNotice.value = '当前方案保持不变。'
+  }
   adjustmentOpen.value = true
   await activateAdjustmentDialog(event.currentTarget as HTMLElement)
 }
@@ -296,6 +322,8 @@ const openAdjustment = async (event: Event): Promise<void> => {
 const closeAdjustment = async (): Promise<void> => {
   if (draft.adjustmentPending) return
   adjustmentGeneration += 1
+  adjustmentController?.abort()
+  generatingAdjustment.value = false
   review.value = null
   adjustmentOpen.value = false
   adjustmentError.value = ''
@@ -311,7 +339,7 @@ const selectAdjustmentIntent = (intent: AdjustmentIntent): void => {
 }
 
 
-const generateAdjustment = async (): Promise<void> => {
+const generateAdjustment = async (force = false): Promise<void> => {
   if (draft.adjustmentPending || generatingAdjustment.value) return
   if (!adjustmentIntent.value) {
     adjustmentError.value = '先选择这次想调整的方向。'
@@ -323,41 +351,57 @@ const generateAdjustment = async (): Promise<void> => {
     adjustmentError.value = '可用时间请填大于 0 的分钟数，或留空。'
     return
   }
-  if (experience.value !== (library.profile.trainingExperience ?? null)) {
-    const generation = adjustmentGeneration
-    generatingAdjustment.value = true
-    try { await library.saveProfile({ ...library.profile, trainingExperience: experience.value }) }
-    catch { adjustmentError.value = '训练经验未保存成功，请重试。'; return }
-    finally { generatingAdjustment.value = false }
+  const generation = ++adjustmentGeneration
+  const controller = new AbortController()
+  adjustmentController?.abort()
+  adjustmentController = controller
+  generatingAdjustment.value = true
+  if (force) adjustmentStep.value = 'intent'
+  try {
+    if (experience.value !== (library.profile.trainingExperience ?? null)) {
+      await library.saveProfile({ ...library.profile, trainingExperience: experience.value })
+      if (generation !== adjustmentGeneration || !adjustmentOpen.value) return
+    }
+    const contextRevision = personalizationContextRevision.value
+    const proposal = await draft.proposeModelAdjustment({
+      contextRevision,
+      intent: adjustmentIntent.value,
+      trainingExperience: library.profile.trainingExperience ?? null,
+      signals: matchingFeedback(draft.plan, library.actionFeedback),
+      availableMinutes: availableMinutes.value,
+      energy: energy.value,
+      hasSafetyStopSignal: adjustmentSafetyStop.value,
+      generatedAt: new Date().toISOString(),
+    }, controller.signal, force)
     if (generation !== adjustmentGeneration || !adjustmentOpen.value) return
+    if (contextRevision !== personalizationContextRevision.value) {
+      draft.discardAdjustmentProposal()
+      throw new UserMessageError('训练资料或反馈已改变，请重新生成建议。')
+    }
+    review.value = createAdjustmentReview(proposal)
+    expandedReviewId.value = proposal.changes[0]?.itemId ?? null
+    if (availableMinutes.value !== null && proposal.impact.estimatedSecondsAfter > availableMinutes.value * 60) {
+      adjustmentNotice.value = `调整后预计仍需 ${formatEstimate(proposal.impact.estimatedSecondsAfter)}，未达到 ${availableMinutes.value} 分钟目标。`
+    }
+    if (proposal.status === 'no_change') {
+      adjustmentNotice.value = adjustmentSafetyStop.value
+        ? '有不适时不会生成调整；请停止训练，并在需要时寻求专业帮助。'
+        : availableMinutes.value !== null && adjustmentIntent.value === 'shorter_session' && proposal.impact.estimatedSecondsBefore <= availableMinutes.value * 60
+          ? '当前预计用时已在可用时间内，保留原方案。'
+          : '当前方案保持不变，可以直接编辑动作数字。'
+    }
+    adjustmentStep.value = 'preview'
+    void nextTick(() => {
+      adjustmentDialog.value?.scrollTo?.({ top: 0 })
+      adjustmentDialog.value?.querySelector<HTMLElement>('[data-preview-heading]')?.focus()
+    })
+  } catch (error) {
+    if (generation === adjustmentGeneration && !controller.signal.aborted) {
+      adjustmentError.value = userMessage(error, '调整建议暂不可用，请重试或直接编辑数字。')
+    }
+  } finally {
+    if (generation === adjustmentGeneration) generatingAdjustment.value = false
   }
-  const proposal = draft.proposeAdjustment({
-    contextRevision: personalizationContextRevision.value,
-    intent: adjustmentIntent.value,
-    trainingExperience: library.profile.trainingExperience ?? null,
-    signals: matchingFeedback(draft.plan, library.actionFeedback),
-    availableMinutes: availableMinutes.value,
-    energy: energy.value,
-    hasSafetyStopSignal: adjustmentSafetyStop.value,
-    generatedAt: new Date().toISOString(),
-  })
-  review.value = createAdjustmentReview(proposal)
-  expandedReviewId.value = proposal.changes[0]?.itemId ?? null
-  if (availableMinutes.value !== null && proposal.impact.estimatedSecondsAfter > availableMinutes.value * 60) {
-    adjustmentNotice.value = `按当前保护范围，预计仍需 ${formatEstimate(proposal.impact.estimatedSecondsAfter)}，未达到 ${availableMinutes.value} 分钟目标。`
-  }
-  if (proposal.status === 'no_change') {
-    adjustmentNotice.value = adjustmentSafetyStop.value
-      ? '有不适时不会生成调整；请停止训练，并在需要时寻求专业帮助。'
-      : availableMinutes.value !== null && adjustmentIntent.value === 'shorter_session' && proposal.impact.estimatedSecondsBefore <= availableMinutes.value * 60
-        ? '当前预计用时已在可用时间内，保留原方案。'
-        : `当前方案没有可安全自动调整的字段，预计 ${formatEstimate(proposal.impact.estimatedSecondsAfter)}，可以手动修改。`
-  }
-  adjustmentStep.value = 'preview'
-  void nextTick(() => {
-    adjustmentDialog.value?.scrollTo?.({ top: 0 })
-    adjustmentDialog.value?.querySelector<HTMLElement>('[data-preview-heading]')?.focus()
-  })
 }
 
 const editAdjustmentIntent = async (): Promise<void> => {
@@ -1092,8 +1136,10 @@ const retryOperation = async (): Promise<void> => {
           </button>
 
           <p class="user-priority-note">保留视频明确要求、你的手动修改和重量。</p>
+          <button v-if="adjustmentStep === 'preview'" type="button" :disabled="generatingAdjustment" @click="generateAdjustment(true)">重新生成建议</button>
         </details>
 
+        <p v-if="adjustmentStep === 'preview' && draft.adjustmentProposal?.origin === 'model' && !proposalFeedbackUnavailable" class="adjustment-dialog-notice">{{ draft.adjustmentProposal.summary }}</p>
         <p v-if="adjustmentError" class="inline-error" role="alert">{{ adjustmentError }}</p>
         <p v-if="adjustmentNotice" class="adjustment-dialog-notice" role="status">{{ adjustmentNotice }}</p>
         <p v-if="adjustmentContextStale" class="context-stale-note" role="status">
@@ -1108,7 +1154,7 @@ const retryOperation = async (): Promise<void> => {
               <div v-for="change in group.changes" :key="change.field" class="change-row">
                 <p>{{ changeValue(change.field, change.before.value) }} → {{ changeValue(change.field, reviewValue(group.itemId, change.field)?.value ?? change.after.value) }} · {{ reviewValue(group.itemId, change.field)?.edited ? '你的调整' : 'AI 建议' }}</p>
                 <NumericStepper :label="fieldCopy[change.field].label" :min="change.field === 'restSeconds' ? 0 : 1" :model-value="reviewValue(group.itemId, change.field)?.value ?? null" :invalid="invalidNumber(change.field, reviewValue(group.itemId, change.field)?.value ?? null)" :disabled="draft.adjustmentPending" @update:model-value="updateReview(group.itemId, change.field, $event)" />
-                <p>{{ adjustmentReason(group.itemId, change.reasonCode) }}</p>
+                <p>{{ adjustmentReason(group.itemId, change.reasonCode, change.explanation) }}</p>
               </div>
             </div>
           </article>
@@ -1117,7 +1163,7 @@ const retryOperation = async (): Promise<void> => {
         <footer class="sheet-actions">
           <button v-if="adjustmentStep === 'preview'" type="button" data-edit-adjustment-intent @click="editAdjustmentIntent">修改方向</button>
           <button v-else type="button" @click="closeAdjustment">稍后再说</button>
-          <button v-if="adjustmentStep === 'intent'" type="button" class="done generate-adjustment" data-generate-adjustment :disabled="draft.adjustmentPending || generatingAdjustment" @click="generateAdjustment">{{ generatingAdjustment ? '正在保存资料…' : '查看调整建议' }} <span aria-hidden="true">→</span></button>
+          <button v-if="adjustmentStep === 'intent'" type="button" class="done generate-adjustment" data-generate-adjustment :disabled="draft.adjustmentPending || generatingAdjustment" @click="generateAdjustment()">{{ generatingAdjustment ? 'TrainPal 正在调整…' : '查看调整建议' }} <span aria-hidden="true">→</span></button>
           <button
             v-if="adjustmentStep === 'preview' && draft.adjustmentProposal?.status === 'ready'"
             type="button"

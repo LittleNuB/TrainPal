@@ -135,8 +135,8 @@ const easierChanges = (
   const field: AdjustableField = item.mode === 'duration' ? 'durationSeconds' : 'reps'
   if (eligible(target.value, target.source)) {
     const { minimum, maximum, maximumDelta } = loadBounds(item.mode, target.value)
-    if (target.value < minimum || target.value > maximum) return []
-    const nextValue = Math.max(minimum, target.value - maximumDelta)
+    const nextValue = target.value < minimum || target.value > maximum
+      ? target.value : Math.max(minimum, target.value - maximumDelta)
     if (nextValue !== target.value) {
       changes.push({
         itemId: item.id,
@@ -359,3 +359,32 @@ export function proposePlanAdjustment(input: AdjustmentPolicyInput): AdjustmentP
 }
 
 export const fingerprintDraftPlan = planFingerprint
+
+// Candidate envelopes authorize fields and directions; the model chooses the values and subset.
+export function adjustmentEnvelopes(input: AdjustmentPolicyInput): AdjustmentChange[] {
+  if (input.hasSafetyStopSignal) return []
+  const intent = input.energy === 'tired' && input.intent === 'more_challenging'
+    ? 'easier_to_finish' : input.intent
+  if (intent === 'shorter_session' && input.availableMinutes != null
+    && estimateSeconds(input.basePlan.items) <= input.availableMinutes * 60) return []
+  const candidates = input.basePlan.items.flatMap(item => {
+    if (item.confirmationStatus === 'pending') return []
+    const feedback = latestFeedback(input.signals, item.id)
+    if (intent === 'more_challenging') {
+      const change = challengingChange(item, feedback)
+      return change ? [change] : []
+    }
+    if (intent === 'easier_to_finish') return easierChanges(item, input)
+    return feedback === 'too_easy' ? [] : shorteningCandidates(item)
+  })
+  return candidates.flatMap(change => {
+    const source = input.basePlan.items.find(item => item.id === change.itemId)?.sourceParameters
+    if (change.field !== 'reps' || source?.reps == null || source.reps_max == null) return [change]
+    const bounds = { ...change.policyBounds, minimum: Math.max(change.policyBounds.minimum, source.reps),
+      maximum: Math.min(change.policyBounds.maximum, source.reps_max) }
+    const value = Math.min(bounds.maximum, Math.max(bounds.minimum, change.after.value))
+    return value === change.before.value ? [] : [{ ...change, policyBounds: bounds, after: { ...change.after, value } }]
+  })
+}
+
+export { estimateSeconds, latestFeedback }
