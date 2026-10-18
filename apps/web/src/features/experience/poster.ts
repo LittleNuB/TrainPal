@@ -1,3 +1,4 @@
+import { UserMessageError } from '@/domain/user-message'
 import {
   coachFrameUrls,
   resolveCoachEventAction,
@@ -54,15 +55,15 @@ const POSTER_WIDTH = 1_080
 const POSTER_HEIGHT = 1_920
 
 function asNonNegativeInteger(value: number): number {
-  if (!Number.isFinite(value) || value < 0) throw new Error('海报数据不完整')
+  if (!Number.isFinite(value) || value < 0) throw new UserMessageError('海报数据不完整')
   return Math.round(value)
 }
 
 export function buildCompletionPosterModel(input: CompletionPosterInput): CompletionPosterModel {
-  if (input.outcome !== 'completed') throw new Error('只有完整训练可以生成完成海报')
+  if (input.outcome !== 'completed') throw new UserMessageError('只有完整训练可以生成完成海报')
 
   const planName = input.planName.trim()
-  if (!planName) throw new Error('海报数据不完整')
+  if (!planName) throw new UserMessageError('海报数据不完整')
 
   const durationSeconds = asNonNegativeInteger(input.trainingDurationSeconds)
   const caloriesKcal = asNonNegativeInteger(input.caloriesKcal)
@@ -84,7 +85,7 @@ function createBrowserRuntime(): PosterRuntime {
       canvas.width = width
       canvas.height = height
       const context = canvas.getContext('2d')
-      if (!context) throw new Error('当前浏览器无法生成海报')
+      if (!context) throw new UserMessageError('当前浏览器无法生成海报')
 
       return {
         context,
@@ -92,7 +93,7 @@ function createBrowserRuntime(): PosterRuntime {
           new Promise<Blob>((resolve, reject) => {
             canvas.toBlob((blob) => {
               if (blob) resolve(blob)
-              else reject(new Error('海报生成失败，请重试'))
+              else reject(new UserMessageError('海报生成失败，请重试'))
             }, 'image/png')
           }),
       }
@@ -101,7 +102,7 @@ function createBrowserRuntime(): PosterRuntime {
       return new Promise<CanvasImageSource>((resolve, reject) => {
         const image = new Image()
         image.onload = () => resolve(image)
-        image.onerror = () => reject(new Error('TrainPal 小猫素材加载失败，请重试'))
+        image.onerror = () => reject(new UserMessageError('TrainPal 小猫素材加载失败，请重试'))
         image.src = url
       })
     },

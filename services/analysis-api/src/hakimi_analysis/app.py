@@ -25,6 +25,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from pydantic import ValidationError
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -57,7 +58,15 @@ from hakimi_analysis.models import (
     UpgradeAccessSessionRequest,
 )
 from hakimi_analysis.pipeline import AnalysisPipeline
+from hakimi_analysis.playback import PlaybackChoice, PlaybackRequest, PlaybackService, VoiceCommand
+from hakimi_analysis.providers.base import ProviderError
 from hakimi_analysis.readiness import ReadinessProbe, StaticReadiness
+from hakimi_analysis.reminders import (
+    MAX_REMINDER_INPUT_BYTES,
+    ReminderPlan,
+    ReminderPlanRequest,
+    TrainingReminderPlanner,
+)
 from hakimi_analysis.runs import AnalysisRunManager, as_pipeline
 from hakimi_analysis.runtime_cleanup import RuntimeCleanupProbe, RuntimeCleanupProbeError
 from hakimi_analysis.sources import EmptySourceCatalog, SourceCatalog, VideoSource
@@ -257,6 +266,27 @@ async def stream_run_events(
         yield f"event: {event.type}\ndata: {data}\n\n"
 
 
+async def _until_disconnect[T](request: Request, operation: Awaitable[T]) -> T:
+    async def wait_for_disconnect() -> None:
+        while (await request.receive())["type"] != "http.disconnect":
+            pass
+
+    running = asyncio.ensure_future(operation)
+    disconnected = asyncio.create_task(wait_for_disconnect())
+    try:
+        done, _ = await asyncio.wait(
+            (running, disconnected), return_when=asyncio.FIRST_COMPLETED
+        )
+        if disconnected in done:
+            await disconnected
+            raise asyncio.CancelledError
+        return await running
+    finally:
+        running.cancel()
+        disconnected.cancel()
+        await asyncio.gather(running, disconnected, return_exceptions=True)
+
+
 def create_app(
     *,
     catalog: SourceCatalog | None = None,
@@ -280,6 +310,8 @@ def create_app(
     gymti_llm_concurrency: int = 3,
     release_sha: str | None = None,
     runtime_cleanup: RuntimeCleanupProbe | None = None,
+    playback_service: PlaybackService | None = None,
+    reminder_planner: TrainingReminderPlanner | None = None,
 ) -> FastAPI:
     if (
         not math.isfinite(local_analysis_max_seconds)
@@ -310,14 +342,14 @@ def create_app(
         judge_access_code=secrets.token_urlsafe(16),
     )
     gymti_model_gate = _NonBlockingConcurrencyGate(gymti_llm_concurrency)
+    playback_gate = _NonBlockingConcurrencyGate(2)
+    reminder_gate = _NonBlockingConcurrencyGate(2)
     readiness_probe = readiness or StaticReadiness(
         "provider_configuration_invalid" if app_env == "production" else None
     )
     if cors_origins is None:
         resolved_cors_origins = (
-            []
-            if app_env == "production"
-            else ["http://localhost:5173", "http://127.0.0.1:5173"]
+            [] if app_env == "production" else ["http://localhost:5173", "http://127.0.0.1:5173"]
         )
     else:
         resolved_cors_origins = cors_origins
@@ -344,6 +376,138 @@ def create_app(
     app.state.access_manager = access_manager
     app.state.gymti_service = gymti_service
     app.state.gymti_llm_enabled = gymti_llm_enabled
+
+    # Stream the bounded body before validation; publish that same nested
+    # validator without dangling root $defs references in the operation schema.
+    reminder_schema = ReminderPlanRequest.model_json_schema()
+    reminder_definitions = reminder_schema.pop("$defs")
+
+    def inline_reminder_schema(value: object) -> object:
+        if isinstance(value, dict):
+            reference = value.get("$ref")
+            if isinstance(reference, str):
+                return inline_reminder_schema(
+                    reminder_definitions[reference.removeprefix("#/$defs/")]
+                )
+            return {key: inline_reminder_schema(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [inline_reminder_schema(item) for item in value]
+        return value
+
+    @app.post(
+        "/api/v1/training-reminders",
+        response_model=ReminderPlan,
+        openapi_extra={
+            "requestBody": {
+                "required": True,
+                "description": "Bounded UTF-8 JSON, at most 64000 bytes; no training-state writes.",
+                "content": {
+                    "application/json": {"schema": inline_reminder_schema(reminder_schema)}
+                },
+            }
+        },
+    )
+    async def plan_training_reminders(request: Request, response: Response) -> ReminderPlan:
+        _require_same_origin(request, app_env=app_env, development_origins=resolved_cors_origins)
+        if reminder_planner is None:
+            raise HTTPException(status_code=503, detail="语音提醒暂不可用，仍可查看动作要点")
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > MAX_REMINDER_INPUT_BYTES:
+                raise HTTPException(status_code=413, detail="提醒内容过多，仍可查看动作要点")
+        if not reminder_gate.try_acquire():
+            raise HTTPException(status_code=429, detail="TrainPal正忙，仍可开始训练")
+        try:
+            payload = ReminderPlanRequest.model_validate_json(body)
+
+            plan = await _until_disconnect(request, reminder_planner.plan(payload))
+        except (ValueError, ValidationError) as error:
+            raise HTTPException(
+                status_code=422, detail="提醒安排未完成，训练方案保持不变"
+            ) from error
+        finally:
+            reminder_gate.release()
+        response.headers["Cache-Control"] = "no-store"
+        return plan
+
+    async def playback_body(request: Request, limit: int) -> bytes:
+        _require_same_origin(request, app_env=app_env, development_origins=resolved_cors_origins)
+        if playback_service is None:
+            raise HTTPException(status_code=503, detail="片段调整暂不可用，请手动播放")
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > limit:
+                raise HTTPException(status_code=413, detail="请求过长，请缩短后重试")
+        return bytes(body)
+
+    # Body is streamed above to enforce the byte limit before parsing. Derive
+    # the published request contract from the same validator, inlining its one
+    # option definition because nested JSON schemas cannot use root $defs refs.
+    playback_json_schema = PlaybackRequest.model_json_schema()
+    playback_json_schema["properties"]["options"]["items"] = playback_json_schema.pop("$defs")[
+        "PlaybackOption"
+    ]
+
+    @app.post(
+        "/api/v1/playback-adjustments",
+        response_model=PlaybackChoice,
+        openapi_extra={
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": playback_json_schema}},
+            }
+        },
+    )
+    async def select_playback(request: Request, response: Response) -> PlaybackChoice:
+        body = await playback_body(request, 16_000)
+        assert playback_service is not None
+        if not playback_gate.try_acquire():
+            raise HTTPException(status_code=429, detail="TrainPal正忙，请稍后再试")
+        try:
+            payload = PlaybackRequest.model_validate_json(body)
+            choice = await _until_disconnect(request, playback_service.select(payload))
+        except (ValueError, ValidationError) as error:
+            raise HTTPException(
+                status_code=422, detail="没有找到可靠片段，原片段保持不变"
+            ) from error
+        except (TimeoutError, ProviderError) as error:
+            raise HTTPException(status_code=503, detail="片段查找未完成，训练保持暂停") from error
+        finally:
+            playback_gate.release()
+        response.headers["Cache-Control"] = "no-store"
+        return choice
+
+    @app.post(
+        "/api/v1/playback-voice",
+        response_model=VoiceCommand,
+        openapi_extra={
+            "requestBody": {
+                "required": True,
+                "content": {"audio/wav": {"schema": {"type": "string", "format": "binary"}}},
+                "description": (
+                    "Single-channel 16-bit 16000 Hz PCM WAV, at most 15 seconds and 480044 bytes."
+                ),
+            }
+        },
+    )
+    async def transcribe_playback(request: Request, response: Response) -> VoiceCommand:
+        body = await playback_body(request, 480_044)
+        assert playback_service is not None
+        if not playback_gate.try_acquire():
+            raise HTTPException(status_code=429, detail="TrainPal正忙，请稍后再试")
+        try:
+            command = await _until_disconnect(request, playback_service.transcribe(body))
+        except (ValueError, ValidationError) as error:
+            raise HTTPException(status_code=422, detail="没有听清，请改用文字") from error
+        except (TimeoutError, ProviderError) as error:
+            raise HTTPException(status_code=503, detail="语音暂不可用，请改用文字") from error
+        finally:
+            playback_gate.release()
+        response.headers["Cache-Control"] = "no-store"
+        return command
+
     if local_upload_enabled:
         app.add_middleware(
             LocalUploadBodyLimitMiddleware,
@@ -416,11 +580,7 @@ def create_app(
         """Admit model work immediately or select the request's local fallback."""
 
         session = access_manager.resolve(request.cookies.get(ACCESS_COOKIE_NAME))
-        if (
-            not gymti_llm_enabled
-            or gymti_service is None
-            or not gymti_service.model_available
-        ):
+        if not gymti_llm_enabled or gymti_service is None or not gymti_service.model_available:
             return session, False
         return session, gymti_model_gate.try_acquire()
 
@@ -635,7 +795,7 @@ def create_app(
             source = source_catalog.get(source_id)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="受控视频源不存在") from error
-        if source.public_media_url is not None:
+        if source.public_media_url is not None and app_env != "development":
             return RedirectResponse(source.public_media_url, status_code=307)
         return FileResponse(source.path, media_type="video/mp4")
 

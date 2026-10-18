@@ -1,15 +1,20 @@
-import type { DraftItem } from '@/domain/types'
+import type { DraftItem, DraftPlan } from '@/domain/types'
 import type { CoachStyleId } from '@/domain/coach'
+import type { ReminderPreferences } from '@/domain/reminders'
 
 export interface SavedPlan {
+  reminderCache?: DraftPlan['reminderCache']
   id: string
   name: string
   items: DraftItem[]
+  revision?: DraftPlan['revision']
+  personalization?: DraftPlan['personalization']
   createdAt: string
   updatedAt: string
 }
 
 export interface TrainingProfile {
+  trainingExperience?: import('./personalization').TrainingExperience | null
   id: 'current'
   sex: 'male' | 'female' | null
   age: number | null
@@ -22,17 +27,20 @@ export interface Preferences {
   id: 'current'
   petVisible: boolean
   coachStyleId: CoachStyleId | null
+  speechReminders?: ReminderPreferences
+  coachPositions?: Partial<Record<'mobile' | 'desktop', { x: number; y: number }>>
   updatedAt: string
 }
 
 export interface PlanSnapshot {
+  reminderCache?: DraftPlan['reminderCache']
   name: string
   source: 'draft' | 'saved' | 'sample'
   sourcePlanId: string | null
   items: DraftItem[]
 }
 
-export type SessionStatus = 'active' | 'resting' | 'ready_to_continue' | 'paused'
+export type SessionStatus = 'active' | 'resting' | 'ready_to_continue' | 'paused' | 'countdown'
 export type PauseReason = 'before_start' | 'user' | 'page_hidden' | 'recovered' | 'between_actions'
 
 export interface ActionProgress {
@@ -43,6 +51,11 @@ export interface ActionProgress {
 }
 
 export interface TrainingSession {
+  flowVersion?: 'watch-v1'
+  countdownEndsAt?: string | null
+  pendingCountdown?: boolean
+  pausedRestSeconds?: number
+  autoAdvanceSuspended?: boolean
   id: 'current'
   sessionId: string
   revision: number

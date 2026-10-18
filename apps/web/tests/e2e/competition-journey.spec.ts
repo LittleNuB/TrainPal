@@ -23,12 +23,13 @@ test('quick plan completes through save-as, rest recovery, TrainPal, record, and
   await page.getByRole('button', { name: '已显示' }).click()
   await page.locator('.detail-sheet header').getByRole('button', { name: '关闭详情' }).click()
   await page.getByRole('navigation', { name: '主要导航' }).getByRole('link', { name: '训练', exact: true }).click()
-  await page.getByRole('button', { name: '使用快速体验方案' }).click()
+  await page.getByRole('button', { name: '查看预设方案' }).click()
   await expect(page).toHaveURL(/\/plan$/)
 
   await expect(page.locator('.plan-card')).toHaveCount(3)
   for (const [index, restSeconds] of [[0, '3'], [1, '0'], [2, '0']] as const) {
     await page.locator('.plan-card').nth(index).locator('.action-summary').click()
+    await page.locator('[data-full-editor]').click()
     const sheet = page.locator('.action-sheet')
     await sheet.getByRole('spinbutton').nth(0).fill('1')
     await sheet.getByRole('spinbutton').nth(1).fill('1')
@@ -37,10 +38,10 @@ test('quick plan completes through save-as, rest recovery, TrainPal, record, and
     await expect(sheet).toBeHidden()
   }
 
-  await page.getByRole('button', { name: '另存为' }).click()
+  await page.getByRole('button', { name: '复制方案' }).click()
   await page.getByLabel('新方案名称').fill('评委演示方案')
-  await page.getByRole('button', { name: '保存副本' }).click()
-  await expect(page.getByText('已另存为新方案')).toBeVisible()
+  await page.getByRole('button', { name: '创建副本' }).click()
+  await expect(page.getByText('已创建方案副本')).toBeVisible()
   await page.getByRole('button', { name: '开始训练' }).click()
 
   await expect(page).toHaveURL(/\/training$/)
@@ -49,11 +50,11 @@ test('quick plan completes through save-as, rest recovery, TrainPal, record, and
   await page.getByRole('button', { name: '显示 TrainPal' }).click()
   await expect(page.locator('.training-pet img')).toHaveCount(0)
   await expect(page.getByText(/按自己的节奏来，训练进度会留在这里/)).toBeVisible()
-  await page.getByRole('button', { name: '开始本组' }).click()
-  await expect(page.getByText('组间休息', { exact: true }).first()).toBeVisible({ timeout: 5_000 })
+  await page.getByRole('button', { name: '准备好了' }).click()
+  await expect(page.getByText('组间休息', { exact: true }).first()).toBeVisible({ timeout: 7_000 })
 
   await page.getByRole('link', { name: '返回方案' }).click()
-  await page.getByRole('link', { name: '返回首页' }).click()
+  await page.getByRole('link', { name: '返回训练' }).click()
   await page.getByRole('navigation', { name: '主要导航' }).getByRole('link', { name: '训练', exact: true }).click()
   await expect(page.getByRole('link', { name: '继续训练', exact: true })).toBeVisible()
   await page.reload()
@@ -91,14 +92,14 @@ test('unconfirmed coach requests no cat assets and does not block early ending',
   page.on('dialog', (dialog) => dialog.accept())
 
   await page.goto('/train')
-  await page.getByRole('button', { name: '使用快速体验方案' }).click()
+  await page.getByRole('button', { name: '查看预设方案' }).click()
   await page.getByRole('button', { name: '开始训练' }).click()
 
   await expect(page).toHaveURL(/\/training$/)
   await expect(page.locator('.trainpal-coach')).toHaveCount(0)
   expect(coachAssetRequests).toBe(0)
   await expect(page.getByText(/按自己的节奏来，训练进度会留在这里/)).toBeVisible()
-  await expect(page.getByRole('button', { name: '开始本组' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: '准备好了' })).toBeEnabled()
   await page.getByText('更多训练操作', { exact: true }).click()
   await page.getByRole('button', { name: '提前结束' }).click()
 

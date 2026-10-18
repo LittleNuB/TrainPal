@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { playbackFingerprint } from '@/domain/playback'
 
 import type {
   CommitResult,
@@ -141,6 +142,103 @@ const setup = () => {
 }
 
 describe('TrainingEngine public command interface', () => {
+  it('does not auto-advance when a watch-flow rest tick arrives long after its deadline', async () => {
+    const { engine, clock, persistence } = setup()
+    await engine.dispatch({ type: 'session.create', plan: plan(repsAction({ restSeconds: sourced(2, 'user') })), coachStyleId: null, flowVersion: 'watch-v1' })
+    await engine.dispatch({ type: 'set.start', sessionId: 'session-1', expectedRevision: 0 })
+    await engine.dispatch({ type: 'set.complete', sessionId: 'session-1', expectedRevision: persistence.current!.revision })
+    clock.advance(60_000)
+    const result = expectSuccess(await engine.dispatch({ type: 'clock.tick', sessionId: 'session-1', expectedRevision: persistence.current!.revision }))
+    expect(result.session?.status).toBe('ready_to_continue')
+    expect(result.session?.currentSetActiveMilliseconds).toBe(0)
+  })
+  it('does not credit a suspended watch-flow clock or complete its timed set', async () => {
+    const { engine, clock, persistence } = setup()
+    await engine.dispatch({ type: 'session.create', plan: plan(durationAction()), coachStyleId: null, flowVersion: 'watch-v1' })
+    await engine.dispatch({ type: 'set.start', sessionId: 'session-1', expectedRevision: 0 })
+    clock.advance(1_000)
+    await engine.dispatch({ type: 'clock.tick', sessionId: 'session-1', expectedRevision: 1 })
+    clock.advance(60_000)
+    const result = expectSuccess(await engine.dispatch({ type: 'clock.tick', sessionId: 'session-1', expectedRevision: persistence.current!.revision }))
+    expect(result.record).toBeNull()
+    expect(result.session).toMatchObject({ status: 'paused', pauseReason: 'recovered', currentSetActiveMilliseconds: 1_000 })
+  })
+  it('pausing a watch-flow rest preserves its remaining time and does not start the next set', async () => {
+    const { engine, clock, persistence } = setup()
+    await engine.dispatch({ type: 'session.create', plan: plan(repsAction({ restSeconds: sourced(20, 'user') })), coachStyleId: null, flowVersion: 'watch-v1' })
+    const command = async (type: 'set.start' | 'set.complete' | 'session.pause') => expectSuccess(
+      await engine.dispatch({ type, reason: 'user', sessionId: 'session-1', expectedRevision: persistence.current!.revision }),
+    )
+    await command('set.start')
+    await command('set.complete')
+    clock.advance(5_000)
+    await command('session.pause')
+    clock.advance(10_000)
+    const resumed = await command('set.start')
+    expect(resumed.session?.status).toBe('resting')
+    expect(resumed.session?.scheduledRestSeconds).toBe(15)
+    expect(resumed.session?.currentSetActiveMilliseconds).toBe(0)
+  })
+  it('accepts only a current evidence-backed playback selection while paused', async () => {
+    const { engine, persistence } = setup()
+    const item = repsAction({ sourceRef: { sourceId: 'source' },
+      segment: sourced({ start_seconds: 1, end_seconds: 20 }, 'video'),
+      sourceTips: [{ text: '推起时呼气', category: 'breathing', evidence: { type: 'speech', start_seconds: 3, end_seconds: 5 } }],
+    })
+    await engine.dispatch({ type: 'session.create', plan: plan(item), coachStyleId: null })
+    const fingerprint = playbackFingerprint(item)
+    const selected = expectSuccess(await engine.dispatch({ type: 'playback.select',
+      sessionId: 'session-1', expectedRevision: 0, itemId: item.id, fingerprint,
+      range: { start_seconds: 3, end_seconds: 5 } }))
+    expect(selected.session?.status).toBe('paused')
+    expect(selected.session?.plan.items[0]?.segment).toEqual(item.segment)
+    expect(selected.session?.plan.items[0]?.reps).toEqual(item.reps)
+    expect(selected.session?.plan.items[0]?.playbackSelection).toEqual({ start_seconds: 3, end_seconds: 5 })
+    const stale = await engine.dispatch({ type: 'playback.select', sessionId: 'session-1',
+      expectedRevision: persistence.current!.revision, itemId: item.id, fingerprint,
+      range: { start_seconds: 4, end_seconds: 15 } })
+    expect(stale.ok).toBe(false)
+  })
+  it('watch flow counts down between sets but waits for preparation at a new action', async () => {
+    const { clock, engine, persistence } = setup()
+    expectSuccess(await engine.dispatch({ type: 'session.create', plan: plan(
+      repsAction({ restSeconds: sourced(2, 'user') }), durationAction(),
+    ), coachStyleId: null, flowVersion: 'watch-v1' }))
+    const command = async (type: 'set.prepare' | 'clock.tick' | 'set.complete') => expectSuccess(
+      await engine.dispatch({ type, sessionId: 'session-1', expectedRevision: persistence.current!.revision }),
+    )
+    expect((await command('set.prepare')).session?.status).toBe('countdown')
+    clock.advance(3_000)
+    expect((await command('clock.tick')).session?.status).toBe('active')
+    expect((await command('set.complete')).session?.status).toBe('resting')
+    clock.advance(2_000)
+    expect((await command('clock.tick')).session?.status).toBe('countdown')
+    clock.advance(3_000)
+    expect((await command('clock.tick')).session?.currentSetActiveMilliseconds).toBe(0)
+    await command('set.complete')
+    clock.advance(2_000)
+    const ready = (await command('clock.tick')).session!
+    expect(ready.status).toBe('paused')
+    expect(ready.pauseReason).toBe('between_actions')
+    expect(ready.currentItemIndex).toBe(1)
+    clock.advance(60_000)
+    expect((await engine.restore()).session?.status).toBe('paused')
+  })
+
+  it('watch countdown never catches up after recovery or a suspended clock', async () => {
+    const { clock, engine, persistence } = setup()
+    await engine.dispatch({ type: 'session.create', plan: plan(repsAction()), coachStyleId: null, flowVersion: 'watch-v1' })
+    await engine.dispatch({ type: 'set.prepare', sessionId: 'session-1', expectedRevision: 0 })
+    clock.advance(30_000)
+    const delayed = expectSuccess(await engine.dispatch({ type: 'clock.tick', sessionId: 'session-1', expectedRevision: persistence.current!.revision }))
+    expect(delayed.session?.status).toBe('paused')
+    expect(delayed.session?.currentSetActiveMilliseconds).toBe(0)
+    await engine.dispatch({ type: 'set.prepare', sessionId: 'session-1', expectedRevision: persistence.current!.revision })
+    const restored = expectSuccess(await engine.restore())
+    expect(restored.session?.status).toBe('paused')
+    expect(restored.session?.pauseReason).toBe('recovered')
+  })
+
   it('credits a paused partial set to both the record total and action detail', async () => {
     const { clock, engine } = setup()
     expectSuccess(await engine.dispatch({

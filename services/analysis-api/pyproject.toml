@@ -7,6 +7,7 @@ dependencies = [
   "fastapi>=0.116.0,<1",
   "httpx>=0.28.0,<1",
   "imageio-ffmpeg>=0.6.0,<1",
+  "jsonschema==4.25.1",
   "pydantic-settings>=2.10.0,<3",
   "python-dotenv>=1.1.0,<2",
   "python-multipart>=0.0.20,<1",
@@ -22,6 +23,7 @@ dev = [
   "pytest-asyncio>=1.1.0,<2",
   "respx>=0.22.0,<1",
   "ruff>=0.12.0,<1",
+  "types-jsonschema>=4.23.0,<5",
 ]
 
 [build-system]

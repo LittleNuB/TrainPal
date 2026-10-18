@@ -68,7 +68,9 @@ const mockTerminalRun = async (page: Page, outcome: TerminalOutcome): Promise<vo
 
 const startAnalysis = async (page: Page): Promise<void> => {
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: /刷到的动作/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /把视频整理成训练方案/ })).toBeVisible()
+  await page.locator('.quick-real-section > summary').click()
+  await page.locator('.quick-video-branch > summary').click()
   await page.getByRole('button', { name: '0:02', exact: true }).click()
   await page.getByRole('dialog').getByRole('button', { name: '确认并开始' }).click()
   await expect(page).toHaveURL(/\/analysis$/)
@@ -78,10 +80,12 @@ test('AI empty result stays separate from failures and contains no fallback cand
   await mockTerminalRun(page, 'empty')
   await startAnalysis(page)
 
-  await expect(page.getByText('没有足够可靠的动作证据', { exact: true })).toBeVisible()
+  await expect(page.getByText('暂时没能识别出明确的训练动作', { exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: '手工创建动作' })).toBeVisible()
   await expect(page.locator('.completion-card')).toHaveCount(0)
   await expect(page.getByText('这次没有分析成功', { exact: true })).toHaveCount(0)
+  await page.goto('/train')
+  await expect(page.locator('.saved-row')).toHaveCount(0)
 })
 
 test('AI system failure offers retry and contains no fallback candidate', async ({ page }) => {
@@ -91,7 +95,9 @@ test('AI system failure offers retry and contains no fallback candidate', async 
   await expect(page.getByText('这次没有分析成功', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '重试分析' })).toBeVisible()
   await expect(page.locator('.completion-card')).toHaveCount(0)
-  await expect(page.getByText('没有足够可靠的动作证据', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('暂时没能识别出明确的训练动作', { exact: true })).toHaveCount(0)
+  await page.goto('/train')
+  await expect(page.locator('.saved-row')).toHaveCount(0)
 })
 
 test('AI capacity exhaustion shows Retry-After and the labelled quick path', async ({ page }) => {
@@ -107,6 +113,6 @@ test('AI capacity exhaustion shows Retry-After and the labelled quick path', asy
 
   await expect(page.getByText('实时 AI 名额正在使用', { exact: true })).toBeVisible()
   await expect(page.getByText('约 12 秒后可重试', { exact: true })).toBeVisible()
-  await expect(page.getByRole('link', { name: '使用快速体验方案' })).toBeVisible()
+  await expect(page.getByRole('link', { name: '查看预设方案' })).toBeVisible()
   await expect(page.locator('.completion-card')).toHaveCount(0)
 })

@@ -357,14 +357,14 @@ class LocalMediaProcessor:
             async with asyncio.timeout(self._command_timeout_seconds):
                 _, _stderr = await asyncio.shield(communication)
         except TimeoutError as error:
-            cleanup_error = await _stop_process(process, communication)
+            cleanup_error = await stop_ffmpeg_process(process, communication)
             if cleanup_error is not None:
                 raise MediaProcessingError(
                     f"{operation} extraction cleanup failed"
                 ) from cleanup_error
             raise MediaProcessingError(f"{operation} extraction timed out") from error
         except asyncio.CancelledError:
-            await _stop_process(process, communication)
+            await stop_ffmpeg_process(process, communication)
             raise
         finally:
             if self._runtime_cleanup is not None and process.poll() is not None:
@@ -376,7 +376,7 @@ class LocalMediaProcessor:
             raise MediaProcessingError(f"{operation} extraction produced no output")
 
 
-async def _stop_process(
+async def stop_ffmpeg_process(
     process: subprocess.Popen[bytes],
     communication: asyncio.Future[Any],
 ) -> BaseException | None:

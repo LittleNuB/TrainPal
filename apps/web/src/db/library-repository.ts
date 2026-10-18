@@ -1,5 +1,7 @@
 import type { HachimiDatabase } from '@/db/hachimi-database'
+import { feedbackForRecord, type ActionFeedback } from '@/personalization/feedback'
 import { database } from '@/db/hachimi-database'
+import { archiveDraft } from '@/db/plan-archive'
 import type { DraftItem, DraftPlan } from '@/domain/types'
 import type {
   Preferences,
@@ -10,6 +12,9 @@ import type {
 import { localDataEpochFence, type LocalDataEpochFence } from '@/local-data/epoch-fence'
 
 export interface LibraryRepository {
+  listActionFeedback(): Promise<ActionFeedback[]>
+  saveActionFeedback(recordId: string, itemId: string, value: ActionFeedback['value']): Promise<ActionFeedback>
+  removeActionFeedback(id: string): Promise<void>
   listPlans(): Promise<SavedPlan[]>
   listRecords(): Promise<TrainingRecord[]>
   loadProfile(): Promise<TrainingProfile | null>
@@ -37,6 +42,22 @@ export const createDexieLibraryRepository = (
     writeFence = localDataEpochFence,
   }: LibraryRepositoryOptions = {},
 ): LibraryRepository => ({
+  async listActionFeedback() { return db.actionFeedback.toArray() },
+  async saveActionFeedback(recordId, itemId, value) {
+    writeFence.assertWritable()
+    if (!['too_hard', 'just_right', 'too_easy'].includes(value)) throw new Error('invalid feedback')
+    return db.transaction('rw', db.records, db.actionFeedback, async () => {
+      const record = await db.records.get(recordId)
+      if (!record) throw new Error('training record does not exist')
+      const saved = feedbackForRecord(record, itemId, value, now().toISOString())
+      await db.actionFeedback.put(saved)
+      return saved
+    })
+  },
+  async removeActionFeedback(id) {
+    writeFence.assertWritable()
+    await db.actionFeedback.delete(id)
+  },
   async listPlans() {
     return db.plans.orderBy('updatedAt').reverse().toArray()
   },
@@ -92,6 +113,10 @@ export const createDexieLibraryRepository = (
         id: createId(),
         name: normalizedName,
         items: structuredClone(current.items),
+        revision: current.revision,
+        personalization: current.personalization
+          ? { proposal: null, applied: structuredClone(current.personalization.applied) }
+          : undefined,
         createdAt: timestamp,
         updatedAt: timestamp,
       }
@@ -99,6 +124,8 @@ export const createDexieLibraryRepository = (
         ...structuredClone(current),
         name: normalizedName,
         linkedPlanId: plan.id,
+        personalization: structuredClone(plan.personalization),
+        reminderCache: structuredClone(plan.reminderCache),
         updatedAt: timestamp,
       }
       await db.plans.add(plan)
@@ -117,6 +144,9 @@ export const createDexieLibraryRepository = (
         name: plan.name,
         linkedPlanId: plan.id,
         items: structuredClone(plan.items),
+        revision: plan.revision,
+        personalization: structuredClone(plan.personalization),
+        reminderCache: structuredClone(plan.reminderCache),
         updatedAt: now().toISOString(),
       }
       await db.drafts.put(draft)
@@ -131,8 +161,10 @@ export const createDexieLibraryRepository = (
       const current = await db.drafts.get('current')
       if (!current || current.linkedPlanId !== planId) return null
       const nextDraft: DraftPlan = {
-        ...structuredClone(current),
+        id: 'current',
+        name: '未命名方案',
         linkedPlanId: null,
+        items: [],
         updatedAt: now().toISOString(),
       }
       await db.drafts.put(nextDraft)
@@ -149,8 +181,11 @@ export const createDexieLibraryRepository = (
       items: structuredClone(input.items),
       updatedAt: now().toISOString(),
     }
-    await db.drafts.put(draft)
-    return draft
+    return db.transaction('rw', db.drafts, db.plans, async () => {
+      const previous = await db.drafts.get('current')
+      if (previous && !previous.linkedPlanId && previous.items.length) await archiveDraft(db, previous)
+      return archiveDraft(db, draft, createId)
+    })
   },
 
   async clearAllLocalData() {

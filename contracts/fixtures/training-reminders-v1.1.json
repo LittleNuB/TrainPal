@@ -1,0 +1,40 @@
+[
+  {
+    "case": "integers-and-validated-defaults",
+    "expected_fingerprint": "fd88538092001b5382c569c976543c0709ce7ca2c2919b1bbfe271816f737420",
+    "request": {
+      "plan_id": "synthetic-plan", "plan_revision": 3,
+      "preferences": { "automatic_speech": true, "confirmed": true },
+      "actions": [{
+        "action_id": "synthetic-action", "action_revision": 1, "name": "深蹲", "confirmed": true,
+        "source_id": "synthetic-source", "source_segment": { "start_seconds": 0, "end_seconds": 20 },
+        "mode": "duration", "sets": 1, "duration_seconds": 15,
+        "tips": [{
+          "tip_id": "synthetic-tip", "review_status": "approved",
+          "review_action_id": "synthetic-action", "review_action_revision": 1, "source_id": "synthetic-source",
+          "tip": { "text": "起身时呼气", "category": "breathing",
+            "evidence": { "type": "speech", "start_seconds": 5, "end_seconds": 8 } }
+        }]
+      }]
+    }
+  },
+  {
+    "case": "fraction-and-exponent-times",
+    "expected_fingerprint": "f34af2c545fc70cbd57f1a5c6840c99cba6895384e945ed8be004b02208a2c9a",
+    "request": {
+      "plan_id": "synthetic-plan", "plan_revision": 3,
+      "preferences": { "automatic_speech": true, "confirmed": true },
+      "actions": [{
+        "action_id": "synthetic-action", "action_revision": 1, "name": "深蹲", "confirmed": true,
+        "source_id": "synthetic-source", "source_segment": { "start_seconds": 1e-7, "end_seconds": 20.0 },
+        "mode": "duration", "sets": 1, "duration_seconds": 15,
+        "tips": [{
+          "tip_id": "synthetic-tip", "review_status": "approved",
+          "review_action_id": "synthetic-action", "review_action_revision": 1, "source_id": "synthetic-source",
+          "tip": { "text": "起身时呼气", "category": "breathing",
+            "evidence": { "type": "speech", "start_seconds": 5.125, "end_seconds": 8.5 } }
+        }]
+      }]
+    }
+  }
+]

@@ -45,23 +45,23 @@ const currentFrameUrl = computed(() => frames.value[currentFrameIndex.value] ?? 
 const statusCopy = {
   idle: {
     alt: '在旁边等你开始',
-    fallback: 'TrainPal 正在等你，训练不受影响',
+    fallback: 'TrainPal 正在等你',
   },
   training: {
     alt: '正在陪你训练',
-    fallback: 'TrainPal 正在陪你训练，训练不受影响',
+    fallback: 'TrainPal 正在陪你训练',
   },
   resting: {
     alt: '正在陪你休息',
-    fallback: 'TrainPal 正在陪你休息，训练不受影响',
+    fallback: 'TrainPal 正在陪你休息',
   },
   paused: {
     alt: '正在等你继续',
-    fallback: 'TrainPal 正在等你继续，训练不受影响',
+    fallback: 'TrainPal 正在等你继续',
   },
   completed: {
     alt: '在庆祝训练完成',
-    fallback: 'TrainPal 为你庆祝，训练结果不受影响',
+    fallback: 'TrainPal 为你庆祝',
   },
 } as const satisfies Record<PetState, { alt: string; fallback: string }>
 

@@ -70,6 +70,7 @@ describe('Dexie local training data', () => {
       linkedPlanId: null,
     })
     expect(database.tables.map((table) => table.name).sort()).toEqual([
+      'actionFeedback',
       'drafts',
       'gymtiAttempts',
       'gymtiPendingResults',

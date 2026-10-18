@@ -76,10 +76,13 @@
 
 ## Experience boundaries
 
-- The current design source of truth is
-  `docs/design/trainpal-mobile-experience-brief.md`. Use journey-specific pages,
-  a mobile-first responsive layout, a warm journal theme outside training, and
-  a dark high-contrast training stage. Do not recreate a Douyin feed, right-side
+- The approved design target is ADR-0085 and
+  `docs/design/trainpal-sport-ai-implementation-20261009.md`, backed by the approved
+  18-screen reference atlas. It supersedes ADR-0047's warm/sage/terracotta visual
+  direction and ADR-0028's main numeric editor presentation. Use mobile-first
+  white/cool-light surfaces, navy text, turquoise actions, the existing cat assets,
+  and one expanded action editor at a time. Keep a light training page with a
+  dark real-video surface. Do not recreate a Douyin feed, right-side
   action rail, fixed phone shell, or mandatory 9:16 video stage.
 - Top-level navigation is `首页 / 训练 / 我的`. Analysis, plan editing,
   personalization, an active training session, and results are immersive
@@ -87,6 +90,16 @@
 - Source clips are reference playback unless reliable source rhythm exists.
   Do not expose or persist the legacy public segment-role enum. Uncertainty
   appears as a 待确认动作 or an explicit coverage gap.
+- Product copy describes user-visible state, result, and next action. Keep
+  implementation explanations out of the main flow; use concise, accurate
+  privacy disclosures where relevant. Review loading, empty, error, and
+  accessibility copy as well as the normal page (ADR-0087).
+- Training voice entry follows ADR-0088: the labelled cat shortcut opens one
+  request/result sheet; pause training, keep text secondary, and restore focus
+  on close. Do not add a chat transcript or a second training mascot.
+- Hands-free training is explicit opt-in and local-only for wake recognition.
+  Never silently fall back to remote continuous speech recognition. Stop on
+  hide/unmount and require re-enabling; preserve proposal version checks.
 
 ## Security and data handling
 
@@ -98,6 +111,9 @@
   success, partial completion, cancellation, and failure.
 - Logs may contain run/source IDs, stages, timing, version identifiers, provider
   request IDs, and redacted error codes only.
+- The approved fusion diagnostic adds only fixed reason-code counts (integers
+  0–200); arbitrary keys, content, raw grouping, labels and evidence remain forbidden.
+  See `docs/design/trainpal-fusion-diagnostics-spec-20260919.md`.
 
 ## Verification
 

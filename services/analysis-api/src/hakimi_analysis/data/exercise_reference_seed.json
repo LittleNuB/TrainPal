@@ -1,0 +1,95 @@
+{
+  "schema_version": "exercise-reference.v1",
+  "source_repo": "https://github.com/hasaneyldrm/exercises-dataset",
+  "source_commit": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+  "records": [
+    {
+      "source_id": "0238",
+      "source_name": "cable straight arm pulldown",
+      "equipment": "cable",
+      "source_instructions_en": "Attach a straight bar to the high pulley of a cable machine. Stand facing the machine with your feet shoulder-width apart. Grasp the bar with an overhand grip, keeping your arms straight and your palms facing down. Engage your lats and pull the bar down towards your thighs, keeping your arms straight throughout the movement. Pause for a moment at the bottom, then slowly return the bar to the starting position. Repeat for the desired number of repetitions.",
+      "name_zh": "绳索直杆直臂下压",
+      "aliases": ["直杆直臂下压", "直臂下压", "直臂下拉"],
+      "discriminators": ["高位滑轮连接直杆", "面向器械站立", "手臂基本伸直，直杆下拉至大腿附近", "直杆附件与绳索附件应保留区别"],
+      "review_status": "agent_reviewed_not_expert",
+      "reference_only": true
+    },
+    {
+      "source_id": "0237",
+      "source_name": "cable straight arm pulldown (with rope)",
+      "equipment": "cable",
+      "source_instructions_en": "Attach a rope to the cable machine at the highest setting. Stand facing the machine with your feet shoulder-width apart. Grasp the rope with both hands, palms facing down. Extend your arms fully in front of you, keeping your elbows slightly bent. Engage your lats and slowly pull the rope down towards your thighs, keeping your arms straight. Pause for a moment at the bottom, then slowly release the tension and return to the starting position. Repeat for the desired number of repetitions.",
+      "name_zh": "绳索直臂下压",
+      "aliases": ["绳索直臂下拉", "绳索直臂下压", "直臂下压", "直臂下拉"],
+      "discriminators": ["高位滑轮连接绳索附件", "面向器械站立，双手握绳", "手臂基本伸直，绳索下拉至大腿附近", "附件是绳索，不是直杆"],
+      "review_status": "agent_reviewed_not_expert",
+      "reference_only": true
+    },
+    {
+      "source_id": "0276",
+      "source_name": "dead bug",
+      "equipment": "body weight",
+      "source_instructions_en": "Lie flat on your back with your arms extended towards the ceiling. Bend your knees and lift your legs off the ground, creating a 90-degree angle at your hips and knees. Engage your core and lower back to press your lower back into the ground. Slowly lower your right arm and left leg towards the ground, keeping them straight and hovering just above the floor. Pause for a moment, then return to the starting position. Repeat the movement with your left arm and right leg. Continue alternating sides for the desired number of repetitions.",
+      "name_zh": "死虫式",
+      "aliases": ["死虫", "死虫式训练", "对侧伸展死虫式"],
+      "discriminators": ["仰卧，起始双臂向上", "起始髋部和膝部弯曲，双腿离地", "对侧手臂与腿交替下放", "本记录描述对侧手臂与腿联动版本，不代表全部死虫式变式"],
+      "review_status": "agent_reviewed_not_expert",
+      "reference_only": true
+    },
+    {
+      "source_id": "0383",
+      "source_name": "dumbbell reverse fly",
+      "equipment": "dumbbell",
+      "source_instructions_en": "Stand with your feet shoulder-width apart and hold a dumbbell in each hand. Bend your knees slightly and hinge forward at the hips, keeping your back straight. Extend your arms straight down in front of you, palms facing each other. Keeping a slight bend in your elbows, raise your arms out to the sides until they are parallel to the ground. Pause for a moment at the top, then slowly lower your arms back down to the starting position. Repeat for the desired number of repetitions.",
+      "name_zh": "俯身哑铃反向飞鸟",
+      "aliases": ["哑铃反向飞鸟", "俯身反向飞鸟", "反向飞鸟"],
+      "discriminators": ["双手各持哑铃", "站姿屈膝，髋部前倾", "双臂从身体下方向两侧抬起", "与胸部贴器械靠垫的坐姿版本不同"],
+      "review_status": "agent_reviewed_not_expert",
+      "reference_only": true
+    },
+    {
+      "source_id": "0602",
+      "source_name": "lever seated reverse fly",
+      "equipment": "leverage machine",
+      "source_instructions_en": "Adjust the seat height and position yourself on the machine with your chest against the pad and your feet flat on the floor. Grasp the handles with an overhand grip and keep your arms slightly bent. Exhale and squeeze your shoulder blades together as you pull the handles back and outward, away from your body. Pause for a moment at the peak contraction, then inhale and slowly return to the starting position. Repeat for the desired number of repetitions.",
+      "name_zh": "器械坐姿反向飞鸟（正握）",
+      "aliases": ["器械反向飞鸟", "坐姿反向飞鸟", "反向飞鸟", "反向蝴蝶机", "反向蝴蝶机飞鸟", "蝴蝶机反向飞鸟"],
+      "discriminators": ["坐在器械上，胸部贴靠垫", "正握器械手柄", "手柄向后和向外移动", "与平行握法版本保留握法区别"],
+      "review_status": "agent_reviewed_not_expert",
+      "reference_only": true
+    },
+    {
+      "source_id": "0601",
+      "source_name": "lever seated reverse fly (parallel grip)",
+      "equipment": "leverage machine",
+      "source_instructions_en": "Adjust the seat height and position yourself on the machine with your chest against the pad and your feet flat on the floor. Grasp the handles with a parallel grip, palms facing each other, and keep your arms slightly bent. Exhale and squeeze your shoulder blades together as you pull the handles back and outward, away from your body. Pause for a moment at the peak contraction, then inhale and slowly return to the starting position. Repeat for the desired number of repetitions.",
+      "name_zh": "器械坐姿反向飞鸟（对握）",
+      "aliases": ["对握反向飞鸟", "平行握反向飞鸟", "器械反向飞鸟", "坐姿反向飞鸟", "反向飞鸟", "反向蝴蝶机", "反向蝴蝶机飞鸟", "蝴蝶机反向飞鸟"],
+      "discriminators": ["坐在器械上，胸部贴靠垫", "平行握法，手掌相对", "手柄向后和向外移动", "与正握版本保留握法区别"],
+      "review_status": "agent_reviewed_not_expert",
+      "reference_only": true
+    },
+    {
+      "source_id": "0662",
+      "source_name": "push-up",
+      "equipment": "body weight",
+      "source_instructions_en": "Start in a high plank position with your hands slightly wider than shoulder-width apart and your feet together. Engage your core and lower your body towards the ground by bending your elbows, keeping your body in a straight line. Pause for a moment when your chest is just above the ground, then push yourself back up to the starting position by straightening your arms. Repeat for the desired number of repetitions.",
+      "name_zh": "俯卧撑",
+      "aliases": ["标准俯卧撑", "自重俯卧撑", "掌上压"],
+      "discriminators": ["高位平板支撑起始，手掌略宽于肩", "屈肘下放身体，再伸肘推起", "身体整体保持直线", "本记录未描述脚抬高、跪姿或单臂变式"],
+      "review_status": "agent_reviewed_not_expert",
+      "reference_only": true
+    },
+    {
+      "source_id": "0993",
+      "source_name": "band reverse fly",
+      "equipment": "band",
+      "source_instructions_en": "Attach the band to a stationary object at chest height. Stand with your feet shoulder-width apart and hold the band with both hands in front of you. Keep your arms straight and lift them out to the sides until they are parallel to the ground. Squeeze your shoulder blades together at the top of the movement. Slowly lower your arms back to the starting position. Repeat for the desired number of repetitions.",
+      "name_zh": "弹力带反向飞鸟",
+      "aliases": ["弹力绳反向飞鸟", "弹力带反向飞鸟", "反向飞鸟"],
+      "discriminators": ["弹力带固定于胸部高度的物体", "站姿，双手在身前握住弹力带", "双臂向身体两侧展开", "阻力来自固定弹力带，不是哑铃或器械手柄"],
+      "review_status": "agent_reviewed_not_expert",
+      "reference_only": true
+    }
+  ]
+}

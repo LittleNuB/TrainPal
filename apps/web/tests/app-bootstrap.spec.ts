@@ -57,7 +57,7 @@ class UnavailableTrainingEngine implements TrainingEngine {
 }
 
 describe('应用本机数据启动壳', () => {
-  it('shows the three-item navigation only for top-level route meta', async () => {
+  it('keeps three main destinations and uses desktop-only navigation in immersive journal flows', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const router = createRouter({
@@ -84,15 +84,15 @@ describe('应用本机数据启动壳', () => {
     await flushPromises()
 
     const navigation = wrapper.get('[aria-label="主要导航"]')
-    expect(navigation.findAll('a').map((link) => link.text())).toEqual([
-      '01首页',
-      '02训练',
-      '03我的',
+    expect(navigation.findAll('.nav-links a').map((link) => link.text())).toEqual([
+      '首页',
+      '训练',
+      '我的',
     ])
 
     await router.push('/analysis')
     await flushPromises()
-    expect(wrapper.find('[aria-label="主要导航"]').exists()).toBe(false)
+    expect(wrapper.get('[aria-label="主要导航"]').classes()).toContain('top-level-nav--desktop-only')
   })
 
   it('mounts a recoverable error shell when IndexedDB bootstrap fails', async () => {

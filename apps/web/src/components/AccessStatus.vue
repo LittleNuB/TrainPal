@@ -51,7 +51,7 @@ const submit = async (): Promise<void> => {
     </form>
 
     <div v-if="!access.canAnalyze && access.loaded" class="access-fallback">
-      <RouterLink to="/train">使用快速体验方案</RouterLink>
+      <RouterLink to="/train">查看预设方案</RouterLink>
       <button type="button" :disabled="access.pending" @click="access.load()">刷新名额</button>
     </div>
     <p v-if="access.errorMessage" class="access-error" role="alert">{{ access.errorMessage }}</p>
@@ -61,8 +61,8 @@ const submit = async (): Promise<void> => {
 <style scoped>
 .access-status { width: 100%; margin: 0 auto 14px; padding: 10px 12px; border: 1px solid var(--tp-line); border-radius: 15px; color: var(--tp-ink); background: var(--tp-surface); }
 .access-summary { display: flex; align-items: center; gap: 9px; }
-.access-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--tp-primary); box-shadow: 0 0 0 4px rgb(217 75 43 / 10%); }
-.tier-judge .access-dot { background: var(--tp-secondary); box-shadow: 0 0 0 4px rgb(165 186 99 / 14%); }
+.access-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--tp-primary); box-shadow: 0 0 0 4px rgb(25 205 192 / 10%); }
+.tier-judge .access-dot { background: var(--tp-secondary); box-shadow: 0 0 0 4px rgb(25 205 192 / 14%); }
 .access-summary p { min-width: 0; flex: 1; margin: 0; }
 .access-summary strong,
 .access-summary small { display: block; }
@@ -72,8 +72,8 @@ const submit = async (): Promise<void> => {
 .access-fallback button { min-width: 44px; min-height: 44px; padding: 0 7px; border: 0; color: var(--tp-focus); background: transparent; font-size: 11px; }
 .access-status form { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--tp-line); }
 .access-status form label { display: grid; gap: 4px; color: var(--tp-muted); font-size: 11px; }
-.access-status form input { min-width: 0; min-height: 44px; padding: 0 10px; border: 1px solid var(--tp-line); border-radius: 9px; color: var(--tp-ink); background: #F7F3EA; }
-.access-status form > button { min-height: 44px; align-self: end; padding: 0 11px; border: 0; border-radius: 9px; color: var(--tp-surface); background: var(--tp-primary-readable); font-size: 11px; font-weight: 800; }
+.access-status form input { min-width: 0; min-height: 44px; padding: 0 10px; border: 1px solid var(--tp-line); border-radius: 9px; color: var(--tp-ink); background: #F1F6FA; }
+.access-status form > button { min-height: 44px; align-self: end; padding: 0 11px; border: 0; border-radius: 9px; color: var(--tp-on-primary); background: var(--tp-primary); font-size: 11px; font-weight: 800; }
 .access-status form > button:disabled { opacity: .5; }
 .access-fallback { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; border-top: 1px solid var(--tp-line); }
 .access-fallback a { display: inline-grid; min-height: 44px; place-items: center; color: var(--tp-primary-readable); font-size: 11px; font-weight: 700; text-decoration: none; }

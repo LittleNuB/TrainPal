@@ -4,7 +4,9 @@ const expectedDurations = ['0:02', '0:03', '0:04', '0:05', '0:06']
 
 test('home presents exactly five duration-only real-analysis sources in ascending order', async ({ page }) => {
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: /刷到的动作/ })).toBeVisible()
+  await page.locator('.quick-real-section > summary').click()
+  await page.locator('.quick-video-branch > summary').click()
+  await expect(page.getByRole('heading', { name: /把视频整理成训练方案/ })).toBeVisible()
 
   const sources = page.locator('.quick-real-source')
   await expect(sources).toHaveText(expectedDurations)
@@ -25,6 +27,8 @@ test('real analysis starts once only after the visitor confirms', async ({ page 
   })
 
   await page.goto('/')
+  await page.locator('.quick-real-section > summary').click()
+  await page.locator('.quick-video-branch > summary').click()
   const firstSource = page.getByRole('button', { name: expectedDurations[0], exact: true })
   await firstSource.click()
 

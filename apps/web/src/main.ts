@@ -1,6 +1,3 @@
-import '@fontsource/barlow-condensed/latin-500.css'
-import '@fontsource/barlow-condensed/latin-600.css'
-import '@fontsource/barlow-condensed/latin-700.css'
 import '@/styles/base.css'
 
 import { createApp } from 'vue'

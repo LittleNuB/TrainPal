@@ -104,8 +104,10 @@ def write_manifest(tmp_path: Path, *, media_path: str = "competition/arm-01.mp4"
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("app_env", ["test", "production"])
 async def test_manifest_sources_expose_origin_and_redirect_to_controlled_cdn(
     tmp_path: Path,
+    app_env: str,
 ) -> None:
     manifest_path = write_manifest(tmp_path)
     catalog = SourceCatalog.from_manifest(
@@ -114,7 +116,7 @@ async def test_manifest_sources_expose_origin_and_redirect_to_controlled_cdn(
         public_media_base_url="https://media.example.com/hachimi/",
         duration_probe=lambda path: 48 if path.name == "arm-02.mp4" else 54.4,
     )
-    app = create_app(catalog=catalog, pipeline=EmptyPipeline())
+    app = create_app(catalog=catalog, pipeline=EmptyPipeline(), app_env=app_env)
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -142,6 +144,32 @@ async def test_manifest_sources_expose_origin_and_redirect_to_controlled_cdn(
     ]
     assert media.status_code == 307
     assert media.headers["location"] == "https://media.example.com/hachimi/competition/arm-01.mp4"
+
+
+async def test_development_manifest_media_plays_from_the_validated_local_cache(
+    tmp_path: Path,
+) -> None:
+    catalog = SourceCatalog.from_manifest(
+        manifest_path=write_manifest(tmp_path),
+        media_root=tmp_path / "media",
+        public_media_base_url="https://recording.invalid/media",
+        duration_probe=lambda path: 48 if path.name == "arm-02.mp4" else 54.4,
+    )
+    app = create_app(catalog=catalog, app_env="development")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://127.0.0.1:15180",
+        follow_redirects=False,
+    ) as client:
+        sources = (await client.get("/api/v1/sources")).json()
+        media = await client.get(sources[0]["media_url"], headers={"Range": "bytes=0-3"})
+        missing = await client.get("/api/v1/sources/not-in-manifest/media")
+
+    assert media.status_code == 206
+    assert media.content == b"team"
+    assert media.headers["content-type"] == "video/mp4"
+    assert "location" not in media.headers
+    assert missing.status_code == 404
 
 
 def test_manifest_rejects_media_longer_than_full_source_boundary(tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
 import type { DraftRepository } from '@/domain/types'
 import type { HachimiDatabase } from '@/db/hachimi-database'
 import { database } from '@/db/hachimi-database'
+import { archiveDraft } from '@/db/plan-archive'
 import { localDataEpochFence, type LocalDataEpochFence } from '@/local-data/epoch-fence'
 
 export const createDexieDraftRepository = (
@@ -8,23 +9,16 @@ export const createDexieDraftRepository = (
   writeFence: LocalDataEpochFence = localDataEpochFence,
 ): DraftRepository => ({
   async load() {
-    return db.drafts.get('current')
+    return db.transaction('rw', db.drafts, db.plans, async () => {
+      const current = await db.drafts.get('current')
+      if (!current || current.linkedPlanId || !current.items.length) return current
+      writeFence.assertWritable()
+      return archiveDraft(db, current)
+    })
   },
   async save(plan) {
     writeFence.assertWritable()
-    await db.transaction('rw', db.drafts, db.plans, async () => {
-      await db.drafts.put(plan)
-      if (!plan.linkedPlanId) return
-
-      const linkedPlan = await db.plans.get(plan.linkedPlanId)
-      if (!linkedPlan) throw new Error('linked plan does not exist')
-      await db.plans.put({
-        ...linkedPlan,
-        name: plan.name,
-        items: structuredClone(plan.items),
-        updatedAt: plan.updatedAt,
-      })
-    })
+    return db.transaction('rw', db.drafts, db.plans, () => archiveDraft(db, plan))
   },
 })
 

@@ -21,7 +21,7 @@ for (const width of widths) {
   test(`home journey remains usable without horizontal overflow at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width <= 390 ? 844 : 900 })
     await page.goto('/')
-    await expect(page.getByRole('heading', { name: /刷到的动作/ })).toBeVisible()
+    await expect(page.getByRole('heading', { name: /把视频整理成训练方案/ })).toBeVisible()
     await expect(page.getByText('选择健身视频', { exact: true })).toBeVisible()
     await expect(page.getByRole('navigation', { name: '主要导航' })).toBeVisible()
 
@@ -42,16 +42,17 @@ for (const width of [320, 390] as const) {
   test(`unconfirmed coach leaves the live training help usable at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 })
     await page.goto('/train')
-    await page.getByRole('button', { name: '使用快速体验方案' }).click()
+    await page.getByRole('button', { name: '查看预设方案' }).click()
 
-    await expect(page.getByText(/明确确认前不展示小猫/)).toBeVisible()
+    await page.locator('.extra-settings > summary').click()
+    await expect(page.getByRole('link', { name: 'GYMTI 与教练风格' })).toBeVisible()
     await expect(page.locator('.trainpal-coach')).toHaveCount(0)
     await page.getByRole('button', { name: '开始训练' }).click()
 
     await expect(page).toHaveURL(/\/training$/)
     await expect(page.getByRole('heading', { name: '肩部绕环' })).toBeVisible()
     await expect(page.getByText(/按自己的节奏来，训练进度会留在这里/)).toBeVisible()
-    await expect(page.getByRole('button', { name: '开始本组' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '准备好了' })).toBeVisible()
     await expect(page.locator('.trainpal-coach')).toHaveCount(0)
     await expectNoHorizontalOverflow(page)
   })
@@ -59,7 +60,7 @@ for (const width of [320, 390] as const) {
 
 test('home and optional profile dialog pass the WCAG automated scan', async ({ page }) => {
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: /刷到的动作/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /把视频整理成训练方案/ })).toBeVisible()
   const home = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze()
@@ -77,7 +78,7 @@ test('home and optional profile dialog pass the WCAG automated scan', async ({ p
 
 test('an invalid plan name exposes an associated error and remains accessible', async ({ page }) => {
   await page.goto('/train')
-  await page.getByRole('button', { name: '使用快速体验方案' }).click()
+  await page.getByRole('button', { name: '查看预设方案' }).click()
   const name = page.getByLabel('方案名称')
   await name.fill('')
   await name.press('Tab')

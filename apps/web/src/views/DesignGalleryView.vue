@@ -1,7 +1,7 @@
 <script setup lang="ts">
 const tokens = [
   { name: 'Canvas', variable: '--tp-canvas', value: '#F3EFE5' },
-  { name: 'Surface', variable: '--tp-surface', value: '#FFFDF8' },
+  { name: 'Surface', variable: '--tp-surface', value: '#FFFFFF' },
   { name: 'Ink', variable: '--tp-ink', value: '#1C2822' },
   { name: 'Primary', variable: '--tp-primary', value: '#D94B2B' },
   { name: 'Coach', variable: '--tp-secondary', value: '#A5BA63' },

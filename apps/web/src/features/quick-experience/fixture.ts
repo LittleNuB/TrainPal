@@ -1,6 +1,6 @@
 import type { ActionMode, DraftItem, SourcedValue } from '@/domain/types'
 
-export const QUICK_EXPERIENCE_LABEL = '快速体验方案'
+export const QUICK_EXPERIENCE_LABEL = '预设方案'
 export const QUICK_EXPERIENCE_PLAN_NAME = '8 分钟手臂唤醒'
 
 type IdFactory = () => string
@@ -31,6 +31,7 @@ export function createQuickExperienceDraftItems(
   return QUICK_ACTIONS.map((action) => ({
     id: createId(),
     name: action.name,
+    origin: 'quick_experience',
     sourceRef: null,
     segment: { value: null, source: null },
     mode: action.mode,
