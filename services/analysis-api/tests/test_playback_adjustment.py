@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import wave
@@ -5,10 +6,11 @@ from pathlib import Path
 
 import httpx
 import pytest
+from starlette.types import Message, Scope
 
 from hakimi_analysis.app import create_app
 from hakimi_analysis.models import Transcript
-from hakimi_analysis.playback import PlaybackService
+from hakimi_analysis.playback import PlaybackChoice, PlaybackRequest, PlaybackService
 from hakimi_analysis.providers.ark import ArkResponsesClient
 
 
@@ -126,3 +128,82 @@ async def test_voice_uses_short_pcm_and_deletes_temporary_audio_on_success_and_f
             ).status_code == 413
     assert len(paths) == 2
     assert all(not path.parent.exists() for path in paths)
+
+
+@pytest.mark.parametrize("voice", [True, False])
+async def test_browser_disconnect_cancels_playback_and_cleans_audio_and_slots(voice: bool) -> None:
+    entered: asyncio.Queue[None] = asyncio.Queue()
+    cancelled: asyncio.Queue[None] = asyncio.Queue()
+    release = asyncio.Event()
+    paths: list[Path] = []
+
+    async def wait() -> None:
+        entered.put_nowait(None)
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            cancelled.put_nowait(None)
+            raise
+
+    class Model:
+        async def select_playback(self, payload: PlaybackRequest) -> PlaybackChoice:
+            await wait()
+            return PlaybackChoice(option_id="full")
+
+    class Asr:
+        async def recognize(
+            self, *, audio_path: Path, window_start_seconds: float, request_id: str
+        ) -> Transcript:
+            paths.append(audio_path)
+            assert audio_path.is_file()
+            await wait()
+            return Transcript(text="暂停训练", utterances=[])
+
+    audio = io.BytesIO()
+    with wave.open(audio, "wb") as recording:
+        recording.setnchannels(1)
+        recording.setsampwidth(2)
+        recording.setframerate(16000)
+        recording.writeframes(b"\x00\x00" * 1600)
+    body = audio.getvalue() if voice else json.dumps({
+        "action_name": "俯卧撑", "instruction": "完整教学",
+        "options": [{"id": "full", "label": "完整教学", "start_seconds": 0, "end_seconds": 20}],
+    }).encode()
+    path = "/api/v1/playback-voice" if voice else "/api/v1/playback-adjustments"
+    app = create_app(playback_service=PlaybackService(model=Model(), asr=Asr()))
+    scope: Scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+        "method": "POST", "scheme": "http", "path": path, "raw_path": path.encode(),
+        "query_string": b"", "root_path": "", "headers": [(b"host", b"test")],
+        "client": ("127.0.0.1", 1234), "server": ("test", 80),
+    }
+
+    async def discard_message(message: Message) -> None:
+        pass
+
+    queues: list[asyncio.Queue[Message]] = [asyncio.Queue(), asyncio.Queue()]
+    for queue in queues:
+        queue.put_nowait({"type": "http.request", "body": body, "more_body": False})
+    tasks = [asyncio.create_task(app(scope, queue.get, discard_message)) for queue in queues]
+    try:
+        for _ in tasks:
+            await asyncio.wait_for(entered.get(), 1)
+        for queue in queues:
+            queue.put_nowait({"type": "http.disconnect"})
+        for _ in tasks:
+            await asyncio.wait_for(cancelled.get(), 0.5)
+        await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), 1)
+        assert all(not path.parent.exists() for path in paths)
+        release.set()
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            # Both slots must be usable again, not held until the provider timeout.
+            responses = await asyncio.gather(*(client.post(path, content=body) for _ in tasks))
+        assert all(response.status_code == 200 for response in responses)
+        assert all(not path.parent.exists() for path in paths)
+    finally:
+        release.set()
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)

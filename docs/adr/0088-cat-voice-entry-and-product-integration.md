@@ -25,4 +25,3 @@
 README 使用最终运行页面的截图，注明演示数据来源，更新主线功能描述，移除“新版尚未合并”的过时表述。测试失败和审查发现先修复，再提交合并。
 
 参考：[Duolingo Video Call](https://blog.duolingo.com/video-call/)、[Gemini Live](https://support.google.com/gemini/answer/15274899?hl=en)。选择依据与交互为 TrainPal 自身设计。
-

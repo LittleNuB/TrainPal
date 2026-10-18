@@ -99,4 +99,3 @@ test('cat shortcut, focus and voice states stay usable with a confirmed coach', 
   await page.getByRole('button', { name: '语音唤醒 · 开', exact: true }).click()
   await expect(page.getByRole('button', { name: '语音唤醒 · 关', exact: true })).toBeVisible()
 })
-

@@ -196,9 +196,15 @@ const save = async (restore = false) => {
 }
 const rewind = () => {
   const media = props.video
-  if (!media || !item.value) return
-  const range = currentPlaybackRange(item.value)
-  if (range) media.currentTime = Math.max(range.start_seconds, media.currentTime - 5)
+  const range = item.value && currentPlaybackRange(item.value)
+  if (!media || !range) {
+    message.value = '这个动作没有可回看的视频，训练保持暂停。'
+    return
+  }
+  media.currentTime = Math.max(range.start_seconds, media.currentTime - 5)
+  message.value = media.currentTime === range.start_seconds
+    ? '已回到片段开头，准备好后继续训练。'
+    : '已回退 5 秒，准备好后继续训练。'
 }
 const stopListening = () => { wakeGeneration++; stopWake?.(); stopWake = null }
 const resumeTraining = () => {
@@ -269,7 +275,7 @@ const simpleCommand = async (text: string): Promise<boolean> => {
   if (/^(关闭免手模式|关闭语音唤醒)$/.test(command)) { disableHandsfree(); return true }
   if (/^(暂停|暂停训练|休息一下)$/.test(command)) { message.value = '训练已暂停。'; return true }
   if (/^(继续|继续训练)$/.test(command)) { resumeTraining(); return true }
-  if (/^(回退五秒|回退5秒|后退五秒|后退5秒)$/.test(command)) { rewind(); message.value = '已回退 5 秒，准备好后继续训练。'; return true }
+  if (/^(回退五秒|回退5秒|后退五秒|后退5秒)$/.test(command)) { rewind(); return true }
   return false
 }
 const spoken = async (text: string, listener: number) => {

@@ -266,6 +266,27 @@ async def stream_run_events(
         yield f"event: {event.type}\ndata: {data}\n\n"
 
 
+async def _until_disconnect[T](request: Request, operation: Awaitable[T]) -> T:
+    async def wait_for_disconnect() -> None:
+        while (await request.receive())["type"] != "http.disconnect":
+            pass
+
+    running = asyncio.ensure_future(operation)
+    disconnected = asyncio.create_task(wait_for_disconnect())
+    try:
+        done, _ = await asyncio.wait(
+            (running, disconnected), return_when=asyncio.FIRST_COMPLETED
+        )
+        if disconnected in done:
+            await disconnected
+            raise asyncio.CancelledError
+        return await running
+    finally:
+        running.cancel()
+        disconnected.cancel()
+        await asyncio.gather(running, disconnected, return_exceptions=True)
+
+
 def create_app(
     *,
     catalog: SourceCatalog | None = None,
@@ -400,24 +421,7 @@ def create_app(
         try:
             payload = ReminderPlanRequest.model_validate_json(body)
 
-            async def wait_for_disconnect() -> None:
-                while (await request.receive())["type"] != "http.disconnect":
-                    pass
-
-            planning = asyncio.create_task(reminder_planner.plan(payload))
-            disconnected = asyncio.create_task(wait_for_disconnect())
-            try:
-                done, _ = await asyncio.wait(
-                    (planning, disconnected), return_when=asyncio.FIRST_COMPLETED
-                )
-                if disconnected in done:
-                    await disconnected
-                    raise asyncio.CancelledError
-                plan = await planning
-            finally:
-                planning.cancel()
-                disconnected.cancel()
-                await asyncio.gather(planning, disconnected, return_exceptions=True)
+            plan = await _until_disconnect(request, reminder_planner.plan(payload))
         except (ValueError, ValidationError) as error:
             raise HTTPException(
                 status_code=422, detail="提醒安排未完成，训练方案保持不变"
@@ -463,7 +467,7 @@ def create_app(
             raise HTTPException(status_code=429, detail="TrainPal正忙，请稍后再试")
         try:
             payload = PlaybackRequest.model_validate_json(body)
-            choice = await playback_service.select(payload)
+            choice = await _until_disconnect(request, playback_service.select(payload))
         except (ValueError, ValidationError) as error:
             raise HTTPException(
                 status_code=422, detail="没有找到可靠片段，原片段保持不变"
@@ -494,7 +498,7 @@ def create_app(
         if not playback_gate.try_acquire():
             raise HTTPException(status_code=429, detail="TrainPal正忙，请稍后再试")
         try:
-            command = await playback_service.transcribe(body)
+            command = await _until_disconnect(request, playback_service.transcribe(body))
         except (ValueError, ValidationError) as error:
             raise HTTPException(status_code=422, detail="没有听清，请改用文字") from error
         except (TimeoutError, ProviderError) as error:

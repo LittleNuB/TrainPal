@@ -27,4 +27,3 @@
 - [执行计划](../design/trainpal-sport-ai-implementation-20261009.md)
 - [已通过的 18 屏图册](../../tmp/visual-reference-final-mobile-20261009/index.html)
 - [参考图锁定清单](../design/trainpal-sport-ai-reference-lock-20261009.json)
-

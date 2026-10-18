@@ -51,6 +51,24 @@ const setup = () => {
 }
 
 describe('bounded playback controls', () => {
+  it('reports unavailable rewind without video and seeks only inside the current clip', async () => {
+    const { wrapper, propose } = setup()
+    await propose('回退 5 秒')
+    expect(wrapper.text()).toContain('这个动作没有可回看的视频')
+    expect(wrapper.text()).not.toContain('已回退')
+    expect(wrapper.emitted('resume')).toBeUndefined()
+    const video = document.createElement('video')
+    video.currentTime = 8
+    await wrapper.setProps({ video })
+    await propose('回退 5 秒')
+    expect(video.currentTime).toBe(3)
+    expect(wrapper.text()).toContain('已回退 5 秒')
+    await propose('回退 5 秒')
+    expect(video.currentTime).toBe(0)
+    expect(wrapper.text()).toContain('已回到片段开头')
+    wrapper.unmount()
+  })
+
   it('keeps unsupported wake optional and leaves text commands available', async () => {
     const { wrapper, button } = setup()
     vi.mocked(localWakeAvailability).mockResolvedValue('unavailable')
