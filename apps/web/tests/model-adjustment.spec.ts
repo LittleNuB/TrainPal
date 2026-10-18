@@ -25,6 +25,51 @@ const response = (input: WireInput, value = 11, field = 'reps') => new Response(
 }), { status: 200 })
 
 describe('model-authored plan adjustment', () => {
+  it('reuses the same successful proposal until explicitly regenerated', async () => {
+    const { draft, input } = await setup()
+    const fetcher = vi.fn(async (_url, init) => response(JSON.parse(init.body)))
+    vi.stubGlobal('fetch', fetcher)
+    const first = await draft.proposeModelAdjustment(input, new AbortController().signal)
+    expect(await draft.proposeModelAdjustment(input, new AbortController().signal)).toEqual(first)
+    expect(fetcher).toHaveBeenCalledOnce()
+    await draft.proposeModelAdjustment(input, new AbortController().signal, true)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    const cancelled = new AbortController()
+    cancelled.abort()
+    await expect(draft.proposeModelAdjustment(input, cancelled.signal)).rejects.toThrow()
+  })
+
+  it('does not send pending actions to the model', async () => {
+    const { draft, input } = await setup()
+    draft.addManualAction({ name: '待核对动作', mode: 'reps' })
+    draft.items[1]!.confirmationStatus = 'pending'
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body)
+      expect(body.actions).toHaveLength(1)
+      expect(body.actions[0].id).toBe(draft.items[0]!.id)
+      return response(body)
+    }))
+    await draft.proposeModelAdjustment(input, new AbortController().signal)
+  })
+
+  it('keeps a protected plan usable without calling the model', async () => {
+    const { draft, input } = await setup()
+    draft.items[0]!.reps.source = 'video'
+    const fetcher = vi.fn()
+    vi.stubGlobal('fetch', fetcher)
+    expect((await draft.proposeModelAdjustment(input, new AbortController().signal)).origin).toBe('protected')
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('accepts a small rest increase even when source reps exceed the load policy range', async () => {
+    const { draft, input } = await setup()
+    draft.items[0]!.reps.value = 25
+    draft.items[0]!.restSeconds.source = 'rule'
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => response(JSON.parse(init.body), 65, 'restSeconds')))
+    const result = await draft.proposeModelAdjustment({ ...input, intent: 'easier_to_finish', trainingExperience: 'beginner' }, new AbortController().signal)
+    expect(result.changes[0]!.field).toBe('restSeconds')
+    expect(result.changes[0]!.after.value).toBe(65)
+  })
   it('uses the returned value, requires confirmation, and preserves manual and video values', async () => {
     const { draft, input } = await setup()
     const fetcher = vi.fn(async (_url, init) => response(JSON.parse(init.body)))

@@ -1,3 +1,4 @@
+import { mockModelAdjustment } from './model-adjustment-fixture'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
@@ -226,3 +227,5 @@ test('coach leaves back, empty-plan and save-retry controls clickable', async ({
   await page.reload()
   await expect(page.locator('.saved-row').filter({ hasText: '保存重试验收' })).toHaveCount(1)
 })
+
+test.beforeEach(async ({ page }) => { await mockModelAdjustment(page) })

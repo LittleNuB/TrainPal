@@ -349,6 +349,7 @@ def create_app(
     playback_gate = _NonBlockingConcurrencyGate(2)
     reminder_gate = _NonBlockingConcurrencyGate(2)
     adjustment_gate = _NonBlockingConcurrencyGate(2)
+    plan_adjustments = adjustment_service or PlanAdjustmentService(None)
     readiness_probe = readiness or StaticReadiness(
         "provider_configuration_invalid" if app_env == "production" else None
     )
@@ -413,8 +414,6 @@ def create_app(
         request: Request, response: Response
     ) -> PlanAdjustmentResponse:
         _require_same_origin(request, app_env=app_env, development_origins=resolved_cors_origins)
-        if adjustment_service is None:
-            raise HTTPException(status_code=503, detail="AI 调整暂不可用，请稍后重试或直接编辑数字")
         body = bytearray()
         async for chunk in request.stream():
             body.extend(chunk)
@@ -427,7 +426,7 @@ def create_app(
         if not adjustment_gate.try_acquire():
             raise HTTPException(status_code=429, detail="TrainPal 正忙，请稍后重试")
         try:
-            proposal = await _until_disconnect(request, adjustment_service.propose(payload))
+            proposal = await _until_disconnect(request, plan_adjustments.propose(payload))
         except (ProviderError, ValueError, TimeoutError) as error:
             raise HTTPException(
                 status_code=503, detail="这次未能生成合适的调整，请重试或直接编辑数字"

@@ -135,8 +135,8 @@ const easierChanges = (
   const field: AdjustableField = item.mode === 'duration' ? 'durationSeconds' : 'reps'
   if (eligible(target.value, target.source)) {
     const { minimum, maximum, maximumDelta } = loadBounds(item.mode, target.value)
-    if (target.value < minimum || target.value > maximum) return []
-    const nextValue = Math.max(minimum, target.value - maximumDelta)
+    const nextValue = target.value < minimum || target.value > maximum
+      ? target.value : Math.max(minimum, target.value - maximumDelta)
     if (nextValue !== target.value) {
       changes.push({
         itemId: item.id,

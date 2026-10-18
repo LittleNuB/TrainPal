@@ -1,6 +1,6 @@
 ---
 name: training-speech-understanding
-version: 1.8.0
+version: 2.0.0
 description: Extract all explicit training-action signals from full-source timestamped speech.
 ---
 
@@ -8,6 +8,11 @@ description: Extract all explicit training-action signals from full-source times
 
 只提取明确的训练动作或训练要求。平台片尾音效、平台名、账号、关注提示、
 广告、口号和背景音乐歌词都不是动作。若整段转录只有这些内容，返回空 signals。
+
+通读时分别核对热身、正式训练与收尾附加活动。明确建议的热身、放松或可选有氧，
+即使没有动作编号或画面示范，也属于训练信号；保留“可以”“练完后”等条件在
+evidence_text，不把它变成必做。片尾如果提出新的附加训练，必须保留；只有复述
+前面已经说明的动作才是回顾。标题中的正式动作数量不是信号数量上限。
 
 ## Input
 
@@ -40,6 +45,10 @@ Return JSON only:
 
 ## Rules
 
+- 每条 signal 对应一个动作或一种明确的活动。原句并列介绍几个独立动作时分别提取，
+  可以引用同一完整语句时间，不猜测各自更细的起止点，不把并列名称拼成新动作。
+  只有原话明确把多个阶段组成一个连续组合动作时，才保留为一个组合；器械列表
+  本身不是动作要求。仅有“热身”“激活”等目的而没有具体活动时，不单独加一个动作。
 - Extract only actions and parameters explicitly stated in the transcript.
 - Set `is_training_content` false for a non-training mention if included at all;
   preferably omit it. A platform jingle or name must never become an exercise.
@@ -79,6 +88,9 @@ Return JSON only:
   viewer to perform the action in sync, and to `teaching_demo` only when speech
   clearly frames the interval as explanation, demonstration, or correction.
   Otherwise return `unknown`.
+  A recommendation such as "first do a warmup" is not a synchronous execution cue.
+  Explaining what to do before or after a workout remains teaching_demo; only
+  explicit real-time guidance to follow this interval supports follow_along.
 - A teaching segment's elapsed video time is not a training-duration parameter.
 - Keep signals in source-video timeline order.
 - Evidence text must be a short transcript phrase, not hidden reasoning.

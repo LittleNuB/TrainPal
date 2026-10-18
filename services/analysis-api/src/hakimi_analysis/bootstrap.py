@@ -176,10 +176,13 @@ def build_pipeline(
         asr=asr,
         ark=ark,
         skills=skills,
-        semantic_fusion=SemanticCandidateFusion(model=ark, instructions=skills.fusion_instructions),
+        semantic_fusion=SemanticCandidateFusion(
+            model=ark, instructions=skills.fusion_instructions, include_speech_context=True,
+        ),
         evidence_timeout_seconds=settings.analysis_evidence_timeout_seconds,
         visual_chunk_timeout_seconds=settings.analysis_chunk_timeout_seconds,
         visual_chunk_seconds=settings.analysis_visual_chunk_seconds,
+        visual_short_context_seconds=settings.analysis_visual_short_context_seconds,
         visual_overlap_seconds=settings.analysis_visual_overlap_seconds,
         run_timeout_seconds=settings.run_timeout_seconds,
     )

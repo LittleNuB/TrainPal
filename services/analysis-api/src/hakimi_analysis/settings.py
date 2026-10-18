@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     analysis_chunk_timeout_seconds: float = Field(default=20.0, gt=0)
     analysis_visual_chunk_seconds: float = Field(default=60.0, gt=0, le=300)
     analysis_visual_overlap_seconds: float = Field(default=10.0, ge=0)
+    analysis_visual_short_context_seconds: float = Field(default=0.0, ge=0, le=90)
     analysis_latency_target_max_seconds_per_video_minute: float = Field(default=15.0, gt=0)
     gymti_contract_path: Path = PROJECT_ROOT / "contracts" / "gymti-questionnaire.v1.json"
     gymti_llm_api_key: SecretStr | None = None

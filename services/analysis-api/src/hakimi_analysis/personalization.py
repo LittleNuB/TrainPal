@@ -38,7 +38,7 @@ class PlanAdjustmentRequest(StrictModel):
     available_minutes: float | None = Field(default=None, gt=0, le=1440)
     energy: Literal["usual", "tired"] = "usual"
     safety_stop: bool = False
-    actions: list[AdjustmentAction] = Field(min_length=1, max_length=100)
+    actions: list[AdjustmentAction] = Field(max_length=100)
 
     @model_validator(mode="after")
     def unique_actions(self) -> "PlanAdjustmentRequest":
@@ -188,7 +188,7 @@ def validate_adjustment(request: PlanAdjustmentRequest, decision: ModelAdjustmen
 
 
 class PlanAdjustmentService:
-    def __init__(self, model: AdjustmentModel) -> None:
+    def __init__(self, model: AdjustmentModel | None) -> None:
         self.model = model
 
     async def propose(self, request: PlanAdjustmentRequest) -> PlanAdjustmentResponse:
@@ -201,7 +201,12 @@ class PlanAdjustmentService:
                 changes=[],
                 summary="当前方案保持不变，可以直接编辑动作数字。",
             )
+        if self.model is None:
+            raise ValueError("adjustment model unavailable")
         payload = request.model_dump(mode="json", exclude={"input_fingerprint", "plan_revision"})
+        payload["actions"] = [
+            action.model_dump(mode="json") for action in request.actions if action.confirmed
+        ]
         payload["allowed_values"] = options
         payload["estimated_seconds"] = estimate_actions(request.actions)
         async with asyncio.timeout(25):

@@ -98,6 +98,25 @@ async def test_missing_model_never_returns_a_rule_proposal_as_ai() -> None:
         assert result.status_code == 503
 
 
+@pytest.mark.parametrize("case", ["locked", "safety_stop", "empty"])
+async def test_protected_plan_does_not_require_a_model(case: str) -> None:
+    payload = request_payload()
+    if case == "empty":
+        payload["actions"] = []
+    elif case == "safety_stop":
+        payload["safety_stop"] = True
+    else:
+        request = PlanAdjustmentRequest.model_validate(payload)
+        request.actions[0].reps.source = "video"
+        payload = request.model_dump()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()), base_url="http://test"
+    ) as client:
+        result = await client.post("/api/v1/plan-adjustments", json=payload)
+    assert result.status_code == 200
+    assert result.json()["mode"] == "protected"
+
+
 async def test_safety_stop_skips_model_and_cross_origin_is_rejected() -> None:
     async def forbidden(_: httpx.Request) -> httpx.Response:
         raise AssertionError("must not contact model")

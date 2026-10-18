@@ -1,19 +1,10 @@
+import { mockModelAdjustment } from './model-adjustment-fixture'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 
 for (const width of [320, 390, 768, 1440]) {
 test(`TrainPal previews and applies confirmed changes at ${width}px`, async ({ page }, testInfo) => {
   await page.setViewportSize({ width, height: 900 })
-  await page.route('**/api/v1/plan-adjustments', async route => {
-    const input = route.request().postDataJSON()
-    const action = input.actions[0]
-    await route.fulfill({ json: {
-      input_fingerprint: input.input_fingerprint, plan_revision: input.plan_revision,
-      mode: 'model', summary: '合成测试：小幅增加本次训练量。',
-      changes: [{ action_id: action.id, field: 'durationSeconds',
-        value: action.durationSeconds.value + 5, reason: '合成测试：每组增加五秒。' }],
-    } })
-  })
   await page.goto('/train')
   await page.getByRole('button', { name: '查看预设方案' }).click()
   await expect(page).toHaveURL(/\/plan$/)
@@ -45,3 +36,5 @@ test(`TrainPal previews and applies confirmed changes at ${width}px`, async ({ p
   await expect(page.locator('.action-summary').first()).toContainText('每组 30 秒')
 })
 }
+
+test.beforeEach(async ({ page }) => { await mockModelAdjustment(page) })

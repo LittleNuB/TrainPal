@@ -14,6 +14,7 @@ def configure_local_environment(environment: MutableMapping[str, str]) -> None:
         "ANALYSIS_PROVIDER": "cloud",
         # Local acceptance budgets; these do not change the production entrypoint.
         "ANALYSIS_CHUNK_TIMEOUT_SECONDS": "90",
+        "ANALYSIS_VISUAL_SHORT_CONTEXT_SECONDS": "90",
         "ANALYSIS_EVIDENCE_TIMEOUT_SECONDS": "590",
         "RUN_TIMEOUT_SECONDS": "600",
     }

@@ -43,6 +43,7 @@ def build_acceptance_app(
     *,
     settings: Settings | None = None,
     provider_transport: httpx.AsyncBaseTransport | None = None,
+    temp_root: Path | None = None,
 ) -> FastAPI:
     settings = settings or Settings(web_static_root=PROJECT_ROOT / "apps" / "web" / "dist")
     if settings.app_env != "development" or settings.analysis_provider != "cloud":
@@ -76,7 +77,7 @@ def build_acceptance_app(
         if settings.ark_api_key is not None
         else None
     )
-    temp_root = PROJECT_ROOT / "tmp" / "reminder-acceptance"
+    temp_root = temp_root or PROJECT_ROOT / "tmp" / "reminder-acceptance"
     runtime_cleanup = RuntimeCleanupMonitor(temp_root)
     access = AccessManager(
         cookie_secret=secrets.token_urlsafe(32),
@@ -145,11 +146,12 @@ def _build_acceptance_pipeline(
         ark=model,
         skills=skills,
         semantic_fusion=SemanticCandidateFusion(
-            model=model, instructions=skills.fusion_instructions
+            model=model, instructions=skills.fusion_instructions, include_speech_context=True
         ),
         evidence_timeout_seconds=settings.analysis_evidence_timeout_seconds,
         visual_chunk_timeout_seconds=settings.analysis_chunk_timeout_seconds,
         visual_chunk_seconds=settings.analysis_visual_chunk_seconds,
+        visual_short_context_seconds=settings.analysis_visual_short_context_seconds,
         visual_overlap_seconds=settings.analysis_visual_overlap_seconds,
         run_timeout_seconds=settings.run_timeout_seconds,
     )

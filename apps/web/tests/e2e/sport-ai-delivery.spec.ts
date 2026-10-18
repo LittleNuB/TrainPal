@@ -1,3 +1,4 @@
+import { mockModelAdjustment } from './model-adjustment-fixture'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -221,3 +222,5 @@ test('direct editing keeps errors and controls reachable in a short mobile viewp
     width: 320, reducedHeight: 420, textScale: 1.5, checks: ['long action name', 'collapsed invalid state', 'focused input above fixed action', '44px numeric targets', 'zero rest persistence'],
   }, null, 2))
 })
+
+test.beforeEach(async ({ page }) => { await mockModelAdjustment(page) })

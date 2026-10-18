@@ -58,7 +58,10 @@ async def test_acceptance_serves_the_plan_skill_only_after_an_explicit_request(
         ark_model_id="existing-text-model",
         web_static_root=built_web_root,
     )
-    app = build_acceptance_app(settings=settings, provider_transport=httpx.MockTransport(respond))
+    app = build_acceptance_app(
+        settings=settings, provider_transport=httpx.MockTransport(respond),
+        temp_root=built_web_root.parent / "runtime",
+    )
     async with (
         LifespanManager(app),
         httpx.AsyncClient(
@@ -108,6 +111,7 @@ async def test_acceptance_keeps_the_web_and_api_on_one_origin_without_provider_c
     app = build_acceptance_app(
         settings=Settings(_env_file=None, web_static_root=web_root, app_release_sha="a" * 40),
         provider_transport=httpx.MockTransport(unexpected_provider),
+        temp_root=tmp_path / "runtime",
     )
     async with (
         LifespanManager(app),
@@ -191,6 +195,7 @@ async def test_acceptance_reports_missing_analysis_credentials_and_releases_the_
             web_static_root=built_web_root,
         ),
         provider_transport=httpx.MockTransport(unexpected_provider),
+        temp_root=tmp_path / "runtime",
     )
     async with (
         LifespanManager(app),
@@ -278,6 +283,7 @@ async def test_acceptance_runs_real_media_and_provider_boundaries_without_automa
                 web_static_root=built_web_root,
             ),
             provider_transport=httpx.MockTransport(unavailable_visual),
+            temp_root=tmp_path / "runtime",
         )
         async with (
             LifespanManager(app),
@@ -367,6 +373,7 @@ def test_acceptance_launch_configuration_is_separate_and_preserves_explicit_budg
         "ANALYSIS_PROVIDER": "cloud",
         "ANALYSIS_CHUNK_TIMEOUT_SECONDS": "90",
         "ANALYSIS_EVIDENCE_TIMEOUT_SECONDS": "590",
+        "ANALYSIS_VISUAL_SHORT_CONTEXT_SECONDS": "90",
         "RUN_TIMEOUT_SECONDS": "420",
     }
 

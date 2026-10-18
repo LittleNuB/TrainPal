@@ -2227,7 +2227,6 @@
                       "type": "object"
                     },
                     "maxItems": 100,
-                    "minItems": 1,
                     "title": "Actions",
                     "type": "array"
                   },

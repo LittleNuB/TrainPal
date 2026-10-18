@@ -624,12 +624,25 @@ def test_visual_chunk_windows_cover_the_complete_source_with_bounded_overlap() -
     ]
 
 
+@pytest.mark.parametrize("duration", [68, 90])
+def test_short_video_keeps_intro_and_recap_in_one_visual_context(duration: float) -> None:
+    assert build_visual_chunks(
+        duration, chunk_seconds=60, overlap_seconds=10, short_context_seconds=90
+    ) == [AnalysisWindow(start_seconds=0, end_seconds=duration, expanded=False)]
+
+
+def test_long_video_retains_configured_chunk_coverage() -> None:
+    assert build_visual_chunks(
+        130, chunk_seconds=60, overlap_seconds=10, short_context_seconds=90
+    ) == build_visual_chunks(130, chunk_seconds=60, overlap_seconds=10)
+
+
 def test_skill_repository_loads_all_three_versioned_contracts() -> None:
     repository = SkillRepository.load(Path(__file__).parents[3] / "skills")
 
-    assert repository.speech_version == "1.8.0"
-    assert repository.visual_version == "1.6.2"
-    assert repository.fusion_version == "2.6.0"
+    assert repository.speech_version == "2.0.0"
+    assert repository.visual_version == "1.8.0"
+    assert repository.fusion_version == "2.7.0"
     assert "continuous video clip" in repository.visual_instructions
     assert "clip-local" in repository.visual_instructions
     assert "contact sheet" not in repository.visual_instructions.casefold()

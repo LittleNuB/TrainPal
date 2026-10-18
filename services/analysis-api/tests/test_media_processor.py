@@ -277,10 +277,11 @@ async def test_visual_window_uses_builtin_mpeg4_encoder_for_accurate_seeking(
     assert captured[captured.index("-c:v") + 1] == "mpeg4"
     assert captured[captured.index("-pix_fmt") + 1] == "yuv420p"
     assert "min(1280,iw)" in captured[captured.index("-vf") + 1]
+    assert "min(1280,ih)" in captured[captured.index("-vf") + 1]
     assert captured[captured.index("-r") + 1] == "15"
-    assert captured[captured.index("-b:v") + 1] == "4000k"
-    assert captured[captured.index("-maxrate") + 1] == "4000k"
-    assert captured[captured.index("-bufsize") + 1] == "8000k"
+    assert captured[captured.index("-b:v") + 1] == "2000k"
+    assert captured[captured.index("-maxrate") + 1] == "2000k"
+    assert captured[captured.index("-bufsize") + 1] == "4000k"
 
 
 @pytest.mark.asyncio

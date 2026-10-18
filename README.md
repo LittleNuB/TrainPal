@@ -56,7 +56,7 @@ Copy-Item .env.example .env.local
 
 在 .env.local 配置 ARK_API_KEY、VOLC_ASR_API_KEY 与对应模型，并准备 FFmpeg；配置项见 [.env.example](.env.example)。GYMTI 的模型增强使用其中独立的 GYMTI 配置。
 
-运行包含分析、语音片段查找和训练提醒编排的本地完整体验：
+运行包含视频分析、AI 个性化调整、语音片段查找和训练提醒编排的本地完整体验：
 
 ~~~powershell
 pnpm acceptance

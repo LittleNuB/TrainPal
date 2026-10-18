@@ -321,7 +321,9 @@ async def test_unsafe_reference_is_retained_pending(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("role", ["equipment_setup", "non_training_gesture", "uncertain"])
+@pytest.mark.parametrize(
+    "role", ["equipment_setup", "non_training_gesture", "background_display", "uncertain"]
+)
 async def test_speech_requirements_cannot_be_silently_excluded(role: str) -> None:
     result = await run_roles([group(["speech-1"], role)], [])
     assert len(result.candidates) == 1

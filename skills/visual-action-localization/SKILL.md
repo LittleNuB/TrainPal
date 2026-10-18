@@ -1,6 +1,6 @@
 ---
 name: visual-action-localization
-version: 1.6.2
+version: 1.8.0
 description: Localize all exercise demonstrations in one continuous video chunk.
 ---
 
@@ -11,6 +11,24 @@ description: Localize all exercise demonstrations in one continuous video chunk.
 关节运动和器械足以支持常见动作名称时，应给出名称；不要仅仅因为字幕
 只有“第几个动作”而返回 null。只有画面确实不足以区分动作时才用 null。
 保留可辨认的握法、姿势和器械差异，不推断看不清的变式或训练效果。
+
+先通看完整片段，判断每段画面在教学中的用途，再提取训练动作。片头介绍健身房、
+器械环境、肌群知识或课程主题时，作为背景出现的器械操作、展示和试看动作，
+不构成独立的训练安排；不能因为人物在运动，就另列为一个训练动作。结合前后
+标题、教学转折和具体训练要求判断，不以时间位置或是否有编号作为唯一依据。
+片尾重放配合方案总表、总结或告别时，不把背景中的旧动作再列一次。真正的
+热身、放松和后续训练轮次仍然保留。
+
+热身属于实际训练：有具体热身或放松动作的画面，即使没有动作编号、没有组数或
+次数，也必须提取，缺少的参数留 null。标题列出的正式动作数量不是整个视频的
+动作数量上限。输出前检查正文前后实际做过的热身、放松是否被误当成背景展示。
+
+短暂热身画面只能看清器械或大类、看不清具体运动路径时，使用有依据的大类名称，
+不要猜测肩外旋、内旋、核心等具体部位或变式；正文清晰可辨的变式仍须保留。
+名称与运动方向必须相容，不拼接互相矛盾的训练部位和动作名称。
+一个 segment 只对应一个动作。同一“热身”等章节内先后改变器械与运动方式时，
+分别定位独立动作，不用章节标题或并列器械名称将它们合成一个动作；只有实际
+连续演示一个明确的组合动作时才作为整体。动作编号只是分段依据之一。
 
 ## Input
 
@@ -90,6 +108,11 @@ and no reliable caption tip; these are example values, not defaults for real obs
   for a sustained interval presented for synchronous execution,
   `teaching_demo` for explanation, demonstration, or correction, and `unknown`
   whenever the role is not visually clear.
+  Showing someone doing an exercise is not by itself follow_along. Edited examples
+  with technique captions are teaching_demo. Follow_along requires a continuous
+  viewer-paced execution cue (such as a training countdown or repetitions paced
+  for the viewer); an imperative caption or a brief warmup demonstration is not
+  sufficient. If the intended pace is unclear, use unknown.
 - Never convert the elapsed length of a teaching demonstration into a training
   duration.
 - Do not infer body data, load, injury risk, exercise quality, or effectiveness.

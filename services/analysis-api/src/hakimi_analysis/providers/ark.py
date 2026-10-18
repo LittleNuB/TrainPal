@@ -221,6 +221,7 @@ class ArkResponsesClient:
         observations: list[dict[str, object]],
         instructions: str,
         visual_source_context: dict[str, object] | None = None,
+        source_context: dict[str, object] | None = None,
     ) -> SemanticGrouping:
         return await self._structured_response(
             instructions=instructions,
@@ -230,6 +231,11 @@ class ArkResponsesClient:
                     "text": json.dumps(
                         {
                             "observations": observations,
+                            **(
+                                {"source_context": source_context}
+                                if source_context is not None
+                                else {}
+                            ),
                             **(
                                 {"visual_source_context": visual_source_context}
                                 if visual_source_context is not None
@@ -323,6 +329,8 @@ class ArkResponsesClient:
                 "初学者增加挑战时最多调整一半已确认动作（向下取整）；疲劳时不增加负荷。"
                 "无需全部调整，优先处理有反馈的动作。没有合适调整时返回空 changes。"
                 "reason 用一句简洁中文解释该动作为什么这样调，summary 概括整体变化。"
+                "用用户的话说每组几次、休息多久；不要写允许范围、边界、校验、候选或百分比限制。"
+                "刚开始训练的用户不能称为进阶者；增加挑战是本次意愿，不是训练资历。"
                 "不要编造训练经历、身体数据、诊断或视频依据；不要写接口、规则等内部说明。"
             ),
             content=[{"type": "input_text", "text": json.dumps(payload, ensure_ascii=False)}],

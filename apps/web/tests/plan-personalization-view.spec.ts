@@ -7,6 +7,7 @@ import { actionFeedbackVersion } from '@/personalization/feedback'
 import { useDraftStore } from '@/stores/draft'
 import { useLibraryStore } from '@/stores/library'
 import PlanDraftView from '@/views/PlanDraftView.vue'
+import { requestPlanAdjustment } from '@/api/adjustment-client'
 
 vi.mock('@/api/adjustment-client', async () => {
   const { proposePlanAdjustment } = await import('@/personalization/adjustment-policy')
@@ -34,16 +35,52 @@ const setup = async () => {
   const wrapper = mount(PlanDraftView, { attachTo: document.body, global: { plugins: [pinia, router] } })
   const open = async () => {
     await wrapper.get('[data-adjustment-trigger]').trigger('click')
+    if (wrapper.find('[data-edit-adjustment-intent]').exists()) await wrapper.get('[data-edit-adjustment-intent]').trigger('click')
     await wrapper.get('[data-adjustment-intent="more_challenging"]').trigger('click')
   }
   const generate = async () => {
     await wrapper.get('[data-generate-adjustment]').trigger('click')
     await flushPromises()
   }
-  return { wrapper, draft, library, open, generate }
+  return { wrapper, draft, library, open, generate, pinia, router }
 }
 
 describe('personalization review boundaries', () => {
+  it('does not display a saved legacy rule proposal as a model suggestion', async () => {
+    const { wrapper, draft, open, generate, pinia, router } = await setup()
+    await open()
+    await generate()
+    draft.adjustmentProposal!.policyVersion = 'adjustment-policy.v2'
+    delete draft.adjustmentProposal!.origin
+    wrapper.unmount()
+    vi.mocked(requestPlanAdjustment).mockClear()
+    const returned = mount(PlanDraftView, { attachTo: document.body, global: { plugins: [pinia, router] } })
+    await returned.get('[data-adjustment-trigger]').trigger('click')
+    expect(returned.find('.adjustment-change-list').exists()).toBe(false)
+    expect(returned.find('[data-generate-adjustment]').exists()).toBe(true)
+    expect(requestPlanAdjustment).not.toHaveBeenCalled()
+    await returned.get('[data-generate-adjustment]').trigger('click')
+    await flushPromises()
+    expect(requestPlanAdjustment).toHaveBeenCalledTimes(1)
+    expect(draft.adjustmentProposal?.origin).toBe('model')
+    returned.unmount()
+  })
+  it('shows a saved proposal after remount and context changes without requesting again', async () => {
+    const { wrapper, draft, library, open, generate, pinia, router } = await setup()
+    await open()
+    await generate()
+    const saved = JSON.stringify(draft.adjustmentProposal)
+    wrapper.unmount()
+    library.profile.updatedAt = '2026-10-19T00:00:00Z'
+    vi.mocked(requestPlanAdjustment).mockClear()
+    const returned = mount(PlanDraftView, { attachTo: document.body, global: { plugins: [pinia, router] } })
+    await returned.get('[data-adjustment-trigger]').trigger('click')
+    expect(returned.find('.adjustment-change-list').exists()).toBe(true)
+    expect(returned.get('.context-stale-note').text()).toContain('可以应用这份提案')
+    expect(requestPlanAdjustment).not.toHaveBeenCalled()
+    expect(JSON.stringify(draft.adjustmentProposal)).toBe(saved)
+    returned.unmount()
+  })
   it('stops displaying removed feedback without mutating the original proposal', async () => {
     const { wrapper, draft, library, open, generate } = await setup()
     const item = draft.items[0]!

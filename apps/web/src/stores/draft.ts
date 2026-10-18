@@ -478,9 +478,16 @@ export const useDraftStore = defineStore('draft', () => {
   }
 
   async function proposeModelAdjustment(
-    input: Omit<AdjustmentPolicyInput, 'basePlan'>, signal: AbortSignal,
+    input: Omit<AdjustmentPolicyInput, 'basePlan'>, signal: AbortSignal, force = false,
   ): Promise<AdjustmentProposal> {
+    if (signal.aborted || persistenceSuspended) throw new UserMessageError('调整已取消，请重新生成。')
     const basePlan = cloneJson(plan.value)
+    const identity = proposePlanAdjustment({ ...input, basePlan })
+    const existing = plan.value.personalization?.proposal
+    if (!force && existing?.policyVersion === 'adjustment-policy.v3'
+      && existing.inputFingerprint === identity.inputFingerprint
+      && existing.basePlanRevision === identity.basePlanRevision
+      && existing.basePlanFingerprint === identity.basePlanFingerprint) return cloneJson(existing)
     const generated = await requestPlanAdjustment({ ...input, basePlan }, signal)
     if (signal.aborted || plan.value.id !== basePlan.id || persistenceSuspended
       || (plan.value.revision ?? 0) !== (basePlan.revision ?? 0)

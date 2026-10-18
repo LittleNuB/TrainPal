@@ -13,6 +13,12 @@ export async function requestPlanAdjustment(
   input: AdjustmentPolicyInput, signal: AbortSignal,
 ): Promise<AdjustmentProposal> {
   const envelope = proposePlanAdjustment(input)
+  const allowed = adjustmentEnvelopes(input)
+  if (!allowed.length) return { ...envelope, id: `adjustment-policy.v3:${envelope.inputFingerprint}`,
+    policyVersion: 'adjustment-policy.v3', origin: 'protected', status: 'no_change', changes: [],
+    summary: '当前方案保持不变，可以直接编辑动作数字。',
+    impact: { estimatedSecondsBefore: estimateSeconds(input.basePlan.items),
+      estimatedSecondsAfter: estimateSeconds(input.basePlan.items), deltaRatio: 0 } }
   const response = await fetch('/api/v1/plan-adjustments', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
@@ -21,7 +27,7 @@ export async function requestPlanAdjustment(
       intent: input.intent, experience: input.trainingExperience,
       available_minutes: input.availableMinutes ?? null, energy: input.energy ?? 'usual',
       safety_stop: input.hasSafetyStopSignal,
-      actions: input.basePlan.items.map(item => ({
+      actions: input.basePlan.items.filter(item => item.confirmationStatus !== 'pending').map(item => ({
         id: item.id, name: item.name, mode: item.mode,
         confirmed: item.confirmationStatus !== 'pending', sets: item.sets, reps: item.reps,
         durationSeconds: item.durationSeconds, restSeconds: item.restSeconds,
@@ -38,7 +44,6 @@ export async function requestPlanAdjustment(
     || result.plan_revision !== envelope.basePlanRevision
     || !['model', 'protected'].includes(String(result.mode))
     || typeof result.summary !== 'string' || !result.summary.trim() || result.summary.length > 240) throw failure()
-  const allowed = adjustmentEnvelopes(input)
   const seen = new Set<string>()
   const loads = new Set<string>()
   const changes: AdjustmentChange[] = result.changes.map((change: unknown) => {

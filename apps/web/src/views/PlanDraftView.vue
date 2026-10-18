@@ -4,6 +4,7 @@ import NumericStepper from '@/components/NumericStepper.vue'
 import { matchingFeedback } from '@/personalization/feedback'
 import { UserMessageError, userMessage } from '@/domain/user-message'
 import { createAdjustmentReview } from '@/personalization/adjustment-review'
+import { fingerprintDraftPlan } from '@/personalization/adjustment-policy'
 import type { AdjustmentReview, TrainingExperience } from '@/domain/personalization'
 import TrainingReminderSettings from '@/features/experience/TrainingReminderSettings.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -294,6 +295,19 @@ const openAdjustment = async (event: Event): Promise<void> => {
   adjustmentNotice.value = ''
   adjustmentSafetyStop.value = false
   adjustmentStep.value = 'intent'
+  const saved = draft.adjustmentProposal
+  if (saved?.policyVersion === 'adjustment-policy.v3'
+    && (saved.origin === 'model' || saved.origin === 'protected')
+    && ['ready', 'no_change'].includes(saved.status)
+    && saved.basePlanRevision === (draft.plan.revision ?? 0)
+    && saved.basePlanFingerprint === fingerprintDraftPlan(draft.plan)) {
+    availableMinutes.value = saved.context?.availableMinutes ?? null
+    energy.value = saved.context?.energy ?? 'usual'
+    review.value = createAdjustmentReview(saved)
+    expandedReviewId.value = saved.changes[0]?.itemId ?? null
+    adjustmentStep.value = 'preview'
+    if (saved.status === 'no_change') adjustmentNotice.value = saved.summary ?? '当前方案保持不变。'
+  }
   adjustmentOpen.value = true
   await activateAdjustmentDialog(event.currentTarget as HTMLElement)
 }
@@ -318,7 +332,7 @@ const selectAdjustmentIntent = (intent: AdjustmentIntent): void => {
 }
 
 
-const generateAdjustment = async (): Promise<void> => {
+const generateAdjustment = async (force = false): Promise<void> => {
   if (draft.adjustmentPending || generatingAdjustment.value) return
   if (!adjustmentIntent.value) {
     adjustmentError.value = '先选择这次想调整的方向。'
@@ -335,6 +349,7 @@ const generateAdjustment = async (): Promise<void> => {
   adjustmentController?.abort()
   adjustmentController = controller
   generatingAdjustment.value = true
+  if (force) adjustmentStep.value = 'intent'
   try {
     if (experience.value !== (library.profile.trainingExperience ?? null)) {
       await library.saveProfile({ ...library.profile, trainingExperience: experience.value })
@@ -350,7 +365,7 @@ const generateAdjustment = async (): Promise<void> => {
       energy: energy.value,
       hasSafetyStopSignal: adjustmentSafetyStop.value,
       generatedAt: new Date().toISOString(),
-    }, controller.signal)
+    }, controller.signal, force)
     if (generation !== adjustmentGeneration || !adjustmentOpen.value) return
     if (contextRevision !== personalizationContextRevision.value) {
       draft.discardAdjustmentProposal()
@@ -1114,6 +1129,7 @@ const retryOperation = async (): Promise<void> => {
           </button>
 
           <p class="user-priority-note">保留视频明确要求、你的手动修改和重量。</p>
+          <button v-if="adjustmentStep === 'preview'" type="button" :disabled="generatingAdjustment" @click="generateAdjustment(true)">重新生成建议</button>
         </details>
 
         <p v-if="adjustmentStep === 'preview' && draft.adjustmentProposal?.origin === 'model' && draft.adjustmentProposal.status === 'ready'" class="adjustment-dialog-notice">{{ draft.adjustmentProposal.summary }}</p>
@@ -1140,7 +1156,7 @@ const retryOperation = async (): Promise<void> => {
         <footer class="sheet-actions">
           <button v-if="adjustmentStep === 'preview'" type="button" data-edit-adjustment-intent @click="editAdjustmentIntent">修改方向</button>
           <button v-else type="button" @click="closeAdjustment">稍后再说</button>
-          <button v-if="adjustmentStep === 'intent'" type="button" class="done generate-adjustment" data-generate-adjustment :disabled="draft.adjustmentPending || generatingAdjustment" @click="generateAdjustment">{{ generatingAdjustment ? 'TrainPal 正在调整…' : '查看调整建议' }} <span aria-hidden="true">→</span></button>
+          <button v-if="adjustmentStep === 'intent'" type="button" class="done generate-adjustment" data-generate-adjustment :disabled="draft.adjustmentPending || generatingAdjustment" @click="generateAdjustment()">{{ generatingAdjustment ? 'TrainPal 正在调整…' : '查看调整建议' }} <span aria-hidden="true">→</span></button>
           <button
             v-if="adjustmentStep === 'preview' && draft.adjustmentProposal?.status === 'ready'"
             type="button"
