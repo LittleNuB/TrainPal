@@ -343,6 +343,8 @@ def _public_failure_message(code: ErrorCode) -> str:
         ErrorCode.PROVIDER_ERROR: "动作分析暂时不可用，请稍后重试",
         ErrorCode.SCHEMA_ERROR: "这次没有分析成功，请重试",
         ErrorCode.MEDIA_ERROR: "视频片段准备失败，请重试",
+        ErrorCode.AI_BUDGET_EXHAUSTED: "AI 体验额度已用完，可以继续编辑方案和训练。",
+        ErrorCode.AI_BUDGET_UNAVAILABLE: "AI 暂不可用，可以继续编辑方案和训练。",
         ErrorCode.TIMEOUT: "动作分析超时，请重试",
         ErrorCode.CANCELLED: "动作分析已取消",
     }[code]

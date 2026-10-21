@@ -1,3 +1,5 @@
+import { apiFailure } from './failure'
+import { appUrl } from './url'
 import type { AdjustmentChange, AdjustmentProposal } from '@/domain/personalization'
 import { UserMessageError } from '@/domain/user-message'
 import {
@@ -19,7 +21,7 @@ export async function requestPlanAdjustment(
     summary: '当前方案保持不变，可以直接编辑动作数字。',
     impact: { estimatedSecondsBefore: estimateSeconds(input.basePlan.items),
       estimatedSecondsAfter: estimateSeconds(input.basePlan.items), deltaRatio: 0 } }
-  const response = await fetch('/api/v1/plan-adjustments', {
+  const response = await fetch(appUrl('/api/v1/plan-adjustments'), {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
     body: JSON.stringify({
@@ -37,7 +39,7 @@ export async function requestPlanAdjustment(
       })),
     }),
   })
-  if (!response.ok) throw failure()
+  if (!response.ok) throw await apiFailure(response, failure())
   const result: unknown = await response.json()
   if (!record(result) || !Array.isArray(result.changes)
     || result.input_fingerprint !== envelope.inputFingerprint

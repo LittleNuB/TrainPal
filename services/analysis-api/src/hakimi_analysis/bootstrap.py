@@ -1,10 +1,12 @@
 import secrets
 from pathlib import Path
+from typing import Any
 
 import httpx
 from fastapi import FastAPI
 
 from hakimi_analysis.access import AccessManager
+from hakimi_analysis.ai_budget import AiBudgetLedger, BudgetedAsyncClient
 from hakimi_analysis.gymti import (
     GymtiContractError,
     GymtiService,
@@ -26,7 +28,8 @@ from hakimi_analysis.pipeline import AnalysisPipeline, EmitCallback, PipelineFai
 from hakimi_analysis.playback import PlaybackService
 from hakimi_analysis.providers.ark import ArkResponsesClient
 from hakimi_analysis.providers.asr import VolcAsrClient
-from hakimi_analysis.readiness import ProductionReadiness
+from hakimi_analysis.readiness import PortfolioReadiness, ProductionReadiness
+from hakimi_analysis.reminders import TrainingReminderPlanner
 from hakimi_analysis.runtime_cleanup import RuntimeCleanupMonitor
 from hakimi_analysis.semantic_fusion import SemanticCandidateFusion
 from hakimi_analysis.settings import PROJECT_ROOT, Settings
@@ -137,12 +140,33 @@ def build_catalog(settings: Settings) -> SourceCatalog:
     return SourceCatalog(sources)
 
 
+def budget_from_settings(settings: Settings) -> AiBudgetLedger | None:
+    if settings.deployment_profile == "portfolio" and settings.ai_budget_db_path is None:
+        raise ValueError("portfolio requires a persistent AI budget ledger")
+    return AiBudgetLedger(settings.ai_budget_db_path) if settings.ai_budget_db_path else None
+
+
+def build_http_client(
+    settings: Settings, *, transport: httpx.AsyncBaseTransport | None = None
+) -> httpx.AsyncClient:
+    options: dict[str, Any] = {
+        "timeout": httpx.Timeout(settings.run_timeout_seconds, connect=15),
+        "follow_redirects": False,
+        "transport": transport,
+    }
+    budget = budget_from_settings(settings)
+    if budget:
+        return BudgetedAsyncClient(budget=budget, **options)
+    return httpx.AsyncClient(**options)
+
+
 def build_pipeline(
     settings: Settings,
     http_client: httpx.AsyncClient,
     *,
     temp_root: Path | None = None,
     runtime_cleanup: RuntimeCleanupMonitor | None = None,
+    provider_retry_delays: tuple[float, ...] | None = None,
 ) -> AnalysisPipeline:
     if settings.analysis_provider == "test":
         return DeterministicTestPipeline()
@@ -154,11 +178,18 @@ def build_pipeline(
         max_source_duration_seconds=settings.local_analysis_max_seconds,
         runtime_cleanup=runtime_cleanup,
     )
+    retry_delays = (
+        provider_retry_delays
+        if provider_retry_delays is not None
+        else (() if settings.deployment_profile == "portfolio" else (1.0, 2.0))
+    )
     asr = VolcAsrClient(
         api_key=settings.volc_asr_api_key.get_secret_value(),
         resource_id=settings.volc_asr_resource_id,
         url=settings.volc_asr_url,
         pace_audio=False,
+        budget=budget_from_settings(settings),
+        retry_delays=retry_delays,
     )
     ark = ArkResponsesClient(
         api_key=settings.ark_api_key.get_secret_value(),
@@ -168,6 +199,7 @@ def build_pipeline(
         analysis_response_format=settings.ark_analysis_response_format,
         base_url=settings.ark_base_url,
         http_client=http_client,
+        retry_delays=retry_delays,
     )
     try:
         skills = SkillRepository.load(PROJECT_ROOT / "skills")
@@ -179,7 +211,9 @@ def build_pipeline(
         ark=ark,
         skills=skills,
         semantic_fusion=SemanticCandidateFusion(
-            model=ark, instructions=skills.fusion_instructions, include_speech_context=True,
+            model=ark,
+            instructions=skills.fusion_instructions,
+            include_speech_context=True,
         ),
         evidence_timeout_seconds=settings.analysis_evidence_timeout_seconds,
         visual_chunk_timeout_seconds=settings.analysis_chunk_timeout_seconds,
@@ -240,10 +274,7 @@ def build_default_app() -> FastAPI:
     from hakimi_analysis.app import create_app
 
     settings = Settings()
-    http_client = httpx.AsyncClient(
-        timeout=httpx.Timeout(settings.run_timeout_seconds, connect=15),
-        follow_redirects=False,
-    )
+    http_client = build_http_client(settings)
     catalog = build_catalog(settings)
     temp_root = PROJECT_ROOT / "tmp" / "analysis-runs"
     runtime_cleanup = RuntimeCleanupMonitor(temp_root)
@@ -275,7 +306,10 @@ def build_default_app() -> FastAPI:
         public_concurrency=public_concurrency,
         public_attempt_limit=None,
     )
-    readiness = ProductionReadiness(
+    readiness_type = (
+        PortfolioReadiness if settings.deployment_profile == "portfolio" else ProductionReadiness
+    )
+    readiness = readiness_type(
         settings=settings,
         catalog=catalog,
         temp_root=temp_root,
@@ -309,7 +343,28 @@ def build_default_app() -> FastAPI:
         gymti_llm_concurrency=settings.gymti_llm_concurrency,
         release_sha=settings.app_release_sha,
         runtime_cleanup=runtime_cleanup,
+        reminder_planner=build_reminder_planner(settings, http_client)
+        if settings.training_reminders_enabled
+        else None,
+        public_base_path=settings.public_base_path,
     )
+
+
+def build_reminder_planner(
+    settings: Settings, http_client: httpx.AsyncClient
+) -> TrainingReminderPlanner:
+    model = (
+        ArkResponsesClient(
+            api_key=settings.ark_api_key.get_secret_value(),
+            model_id=settings.ark_model_id,
+            base_url=settings.ark_base_url,
+            http_client=http_client,
+            retry_delays=(),
+        )
+        if settings.ark_api_key is not None
+        else None
+    )
+    return TrainingReminderPlanner(model)
 
 
 def build_adjustment_service(
@@ -347,6 +402,7 @@ def build_playback_service(
             url=settings.volc_asr_url,
             pace_audio=False,
             retry_delays=(),
+            budget=budget_from_settings(settings),
         )
         if settings.volc_asr_api_key
         else None

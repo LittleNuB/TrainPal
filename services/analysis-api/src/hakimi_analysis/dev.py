@@ -12,6 +12,7 @@ def configure_local_environment(environment: MutableMapping[str, str]) -> None:
     defaults = {
         "APP_ENV": "development",
         "ANALYSIS_PROVIDER": "cloud",
+        "TRAINING_REMINDERS_ENABLED": "true",
         # Local acceptance budgets; these do not change the production entrypoint.
         "ANALYSIS_CHUNK_TIMEOUT_SECONDS": "90",
         "ANALYSIS_VISUAL_SHORT_CONTEXT_SECONDS": "90",

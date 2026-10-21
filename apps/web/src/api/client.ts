@@ -1,3 +1,4 @@
+import { appUrl } from './url'
 import type {
   AccessSession,
   AnalysisCapabilities,
@@ -89,7 +90,7 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
       ...init?.headers,
     }
   }
-  const response = await fetch(path, requestInit)
+  const response = await fetch(appUrl(path), requestInit)
   if (!response.ok) {
     let message = '请求失败，请稍后重试'
     try {
@@ -223,7 +224,7 @@ const eventNames = [
 
 export const browserEventStreamFactory: AnalysisEventStreamFactory = {
   open(runId, onEvent, onError) {
-    const eventSource = new EventSource(`/api/v1/analysis-runs/${runId}/events`)
+    const eventSource = new EventSource(appUrl(`/api/v1/analysis-runs/${runId}/events`))
     for (const eventName of eventNames) {
       eventSource.addEventListener(eventName, (event) => {
         try {

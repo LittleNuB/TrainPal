@@ -1,0 +1,6 @@
+{
+  "bridge": "none",
+  "iptables": false,
+  "ip6tables": false,
+  "ip-masq": false
+}

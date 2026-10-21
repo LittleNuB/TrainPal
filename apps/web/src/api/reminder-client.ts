@@ -1,3 +1,5 @@
+import { apiFailure } from './failure'
+import { appUrl } from './url'
 import type { components, operations } from '@/api/schema'
 import { fingerprintTrainingReminderInput } from '@/api/reminder-fingerprint'
 
@@ -88,11 +90,11 @@ export const requestTrainingReminders = async (
   const body = JSON.stringify(input)
   const frozen = JSON.parse(body) as TrainingReminderRequest
   if (new TextEncoder().encode(body).byteLength > 64000) return invalid()
-  const response = await fetch('/api/v1/training-reminders', {
+  const response = await fetch(appUrl('/api/v1/training-reminders'), {
     method: 'POST', credentials: 'same-origin', signal,
     headers: { 'Content-Type': 'application/json' }, body,
   })
-  if (!response.ok) throw new Error('提醒安排暂不可用，仍可开始训练和查看动作要点')
+  if (!response.ok) throw await apiFailure(response, new Error('提醒安排暂不可用，仍可开始训练和查看动作要点'))
   const result: unknown = await response.json()
   signal.throwIfAborted()
   const plan = await validateTrainingReminderPlan(frozen, result)

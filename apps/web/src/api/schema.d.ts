@@ -379,7 +379,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "speech_unavailable" | "visual_unavailable" | "semantic_fusion_unavailable" | "semantic_fusion_conflict";
+            code: "ai_budget_exhausted" | "ai_budget_unavailable" | "speech_unavailable" | "visual_unavailable" | "semantic_fusion_unavailable" | "semantic_fusion_conflict";
             /** Message */
             message: string;
         };
@@ -427,11 +427,8 @@ export interface components {
             /** End Seconds */
             end_seconds: number;
             reason: components["schemas"]["CoverageGapReason"];
-            /**
-             * Retryable
-             * @constant
-             */
-            retryable: true;
+            /** Retryable */
+            retryable: boolean;
             /** Start Seconds */
             start_seconds: number;
         };
@@ -439,7 +436,7 @@ export interface components {
          * CoverageGapReason
          * @enum {string}
          */
-        CoverageGapReason: "provider_error" | "timeout" | "media_error" | "unknown";
+        CoverageGapReason: "ai_budget_exhausted" | "ai_budget_unavailable" | "provider_error" | "timeout" | "media_error" | "unknown";
         /**
          * CoverageStatus
          * @enum {string}
@@ -460,7 +457,7 @@ export interface components {
          * ErrorCode
          * @enum {string}
          */
-        ErrorCode: "configuration_error" | "provider_error" | "schema_error" | "media_error" | "timeout" | "cancelled";
+        ErrorCode: "configuration_error" | "provider_error" | "schema_error" | "media_error" | "timeout" | "ai_budget_exhausted" | "ai_budget_unavailable" | "cancelled";
         /** EvidenceSpan */
         EvidenceSpan: {
             /** End Seconds */

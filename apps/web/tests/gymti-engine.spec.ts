@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest'
 
 import goldenVectors from '../../../contracts/gymti-golden-vectors.v1.json'

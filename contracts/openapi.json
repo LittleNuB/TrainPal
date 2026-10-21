@@ -268,6 +268,8 @@
         "properties": {
           "code": {
             "enum": [
+              "ai_budget_exhausted",
+              "ai_budget_unavailable",
               "speech_unavailable",
               "visual_unavailable",
               "semantic_fusion_unavailable",
@@ -461,7 +463,6 @@
             "$ref": "#/components/schemas/CoverageGapReason"
           },
           "retryable": {
-            "const": true,
             "title": "Retryable",
             "type": "boolean"
           },
@@ -482,6 +483,8 @@
       },
       "CoverageGapReason": {
         "enum": [
+          "ai_budget_exhausted",
+          "ai_budget_unavailable",
           "provider_error",
           "timeout",
           "media_error",
@@ -536,6 +539,8 @@
           "schema_error",
           "media_error",
           "timeout",
+          "ai_budget_exhausted",
+          "ai_budget_unavailable",
           "cancelled"
         ],
         "title": "ErrorCode",

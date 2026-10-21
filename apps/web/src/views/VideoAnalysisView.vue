@@ -348,7 +348,7 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
         <section v-if="analysis.coverageGaps.length" class="coverage-gaps" aria-labelledby="coverage-title">
           <div>
             <strong id="coverage-title">还有 {{ analysis.coverageGaps.length }} 段未能识别</strong>
-            <p>可以重试这些片段，或先查看已识别的动作。</p>
+            <p>{{ analysis.coverageGaps.some(gap => gap.retryable) ? '可以重试这些片段，或先查看已识别的动作。' : 'AI 暂不可继续分析，可以先查看已识别的动作。' }}</p>
           </div>
           <article v-for="gap in analysis.coverageGaps" :key="`${gap.start_seconds}-${gap.end_seconds}`">
             <span>{{ formatTime(gap.start_seconds) }}—{{ formatTime(gap.end_seconds) }}</span>
@@ -428,7 +428,8 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
           <strong>这次没有分析成功</strong>
           <p>{{ analysis.error?.message ?? analysis.restoreError ?? '系统没有返回可用结果。' }}</p>
         </div>
-        <button type="button" :disabled="!canRetryWithCurrentSource" @click="retryAnalysis">重试分析</button>
+        <button v-if="analysis.error?.retryable !== false" type="button" :disabled="!canRetryWithCurrentSource" @click="retryAnalysis">重试分析</button>
+        <RouterLink v-else to="/plan">查看或编辑方案</RouterLink>
       </section>
 
       <section v-else-if="analysis.status === 'cancelled'" class="state-card state-card--stacked tp-card">

@@ -12,6 +12,7 @@ from typing import Literal, Protocol
 
 from pydantic import Field, ValidationError, field_validator
 
+from hakimi_analysis.ai_budget import AiBudgetError
 from hakimi_analysis.exercise_references import ExerciseReferenceCatalog
 from hakimi_analysis.fusion import fuse_candidates
 from hakimi_analysis.fusion_diagnostics import FusionDiagnosticCode
@@ -439,6 +440,8 @@ class SemanticCandidateFusion:
                     shared_sources = contextual.shared_sources
         except TimeoutError:
             return finish(_unavailable(observations, "unavailable_timeout"))
+        except AiBudgetError:
+            raise
         except ProviderError:
             return finish(_unavailable(observations, "unavailable_provider"))
         by_id = {item.id: item for item in observations}
