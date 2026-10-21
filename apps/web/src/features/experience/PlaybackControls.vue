@@ -11,8 +11,12 @@ import { useLibraryStore } from '@/stores/library'
 import { captureVoiceCommand } from '@/training/voice-command'
 import { installLocalWake, localWakeAvailability, startLocalWake } from '@/training/voice-wake'
 import { userMessage } from '@/domain/user-message'
+import type { TrainingEngineResult, TrainingSetConfirmation } from '@/training/training-engine'
 
-const props = defineProps<{ video: HTMLVideoElement | null; state?: PetState; cue?: CoachMotionCue | null }>()
+const props = defineProps<{
+  video: HTMLVideoElement | null; state?: PetState; cue?: CoachMotionCue | null; immersive?: boolean
+  completeSet: (confirmation: TrainingSetConfirmation) => Promise<TrainingEngineResult | null>
+}>()
 const emit = defineEmits<{ busy: [value: boolean]; resume: []; handsfree: [value: boolean] }>()
 const training = useTrainingStore()
 const draft = useDraftStore()
@@ -20,7 +24,7 @@ const library = useLibraryStore()
 const item = computed(() => training.currentItem)
 const instruction = ref('')
 const message = ref('')
-const phase = ref<'idle' | 'recording' | 'finding' | 'preview' | 'saving'>('idle')
+const phase = ref<'idle' | 'recording' | 'finding' | 'preview' | 'saving' | 'completing'>('idle')
 const proposal = ref<PlaybackOption | null>(null)
 const expanded = ref(false)
 const sheet = ref<HTMLDialogElement | null>(null)
@@ -41,21 +45,23 @@ let wakePause: Promise<boolean> | null = null
 let wakeItemId: string | undefined
 let controller: AbortController | null = null
 let generation = 0
-let binding: { sessionId: string; revision: number; itemId: string; fingerprint: string } | null = null
+let binding: { sessionId: string; revision: number; itemId: string; setIndex: number; fingerprint: string; canCompleteSet: boolean } | null = null
 let previewing = false
 let timeout: ReturnType<typeof setTimeout> | null = null
 const locked = computed(() => phase.value !== 'idle')
 watch(() => locked.value || expanded.value, (value) => emit('busy', value), { flush: 'sync' })
 const listening = computed(() => phase.value === 'recording' || wakeAwake.value)
 const title = computed(() => listening.value ? '我在听' : phase.value === 'finding' ? '正在找讲解'
-  : phase.value === 'saving' ? '正在保存片段' : proposal.value ? '找到这段讲解'
+  : phase.value === 'completing' ? '正在记录本组' : phase.value === 'saving' ? '正在保存片段' : proposal.value ? '找到这段讲解'
     : voiceNotice.value && noticeMode.value === 'wake' ? '喊 TrainPal，就能说' : '跟我说')
-watch(expanded, async (open) => {
+watch([expanded, () => props.immersive], async ([open, immersive], [wasOpen, wasImmersive]) => {
   await nextTick()
-  if (disposed || open !== expanded.value) return
+  if (disposed || open !== expanded.value || immersive !== props.immersive) return
   if (open) {
+    // Moving an open native dialog preserves `open` but removes its modality.
+    if (sheet.value?.open && immersive !== wasImmersive) sheet.value.close()
     if (!sheet.value?.open) sheet.value?.showModal()
-  } else {
+  } else if (wasOpen) {
     sheet.value?.close()
     entry.value?.focus({ preventScroll: true })
   }
@@ -63,6 +69,7 @@ watch(expanded, async (open) => {
 const currentBinding = (): boolean => Boolean(binding && training.session
   && training.session.sessionId === binding.sessionId && training.session.revision === binding.revision
   && item.value?.id === binding.itemId && playbackFingerprint(item.value) === binding.fingerprint
+  && training.session.currentSetIndex === binding.setIndex
   && training.session.status === 'paused' && !training.commandLocked)
 
 const stopPreview = () => { if (previewing) props.video?.pause(); previewing = false }
@@ -73,8 +80,8 @@ const cancel = () => {
   stopPreview()
   wakeAwake.value = false
   proposal.value = null
-  if (phase.value === 'saving') {
-    message.value = '正在完成保存，训练会保持暂停。'
+  if (phase.value === 'saving' || phase.value === 'completing') {
+    message.value = phase.value === 'completing' ? '正在记录本组完成情况…' : '正在完成保存，训练会保持暂停。'
   } else {
     phase.value = 'idle'
     message.value = '原片段保持不变，准备好后可继续训练。'
@@ -82,14 +89,22 @@ const cancel = () => {
 }
 
 const pauseAndBind = async (): Promise<boolean> => {
+  const current = training.session
+  if (!current || !item.value) return false
+  const target = { sessionId: current.sessionId, itemId: item.value.id, setIndex: current.currentSetIndex }
   props.video?.pause()
+  if (currentBinding()) return true
+  const canCompleteSet = current.status === 'active' || (current.status === 'paused'
+    && current.pauseReason === 'user' && !current.pendingCountdown && !(current.pausedRestSeconds ?? 0))
   if (training.session?.status !== 'paused') {
     const paused = await training.pause('user')
     if (!paused.ok) { message.value = paused.message; return false }
   }
-  if (!training.session || !item.value || training.commandLocked) return false
+  if (!training.session || !item.value || training.commandLocked
+    || training.session.sessionId !== target.sessionId || item.value.id !== target.itemId
+    || training.session.currentSetIndex !== target.setIndex) return false
   binding = { sessionId: training.session.sessionId, revision: training.session.revision,
-    itemId: item.value.id, fingerprint: playbackFingerprint(item.value) }
+    itemId: item.value.id, setIndex: training.session.currentSetIndex, fingerprint: playbackFingerprint(item.value), canCompleteSet }
   return true
 }
 
@@ -270,8 +285,40 @@ const speakOnce = async () => {
 }
 const acceptVoice = () => { voiceConsent.value = true; voiceNotice.value = false; speakOnce() }
 const shortcut = (text: string) => { instruction.value = text; void find() }
+const completeCurrentSet = async () => {
+  stopListening()
+  const session = training.session
+  if (!currentBinding() || !binding || !session) {
+    message.value = '这一组的进度已变化，请重新发出指令。'
+    return
+  }
+  if (item.value?.mode !== 'reps') {
+    message.value = '计时动作会在倒计时结束后自动完成，可以说“继续训练”。'
+    return
+  }
+  if (!binding.canCompleteSet || session.pauseReason !== 'user' || session.pendingCountdown || (session.pausedRestSeconds ?? 0) > 0) {
+    message.value = '当前没有正在进行的一组，可以说“继续训练”。'
+    return
+  }
+  const request = generation
+  phase.value = 'completing'
+  try {
+    const result = await props.completeSet({ sessionId: binding.sessionId, expectedRevision: binding.revision,
+      itemId: binding.itemId, setIndex: binding.setIndex })
+    if (disposed || request !== generation) return
+    if (result?.ok) {
+      expanded.value = false
+      textEntry.value = false
+      voiceNotice.value = false
+      message.value = result.session?.status === 'resting' ? '本组已完成，休息一下。' : '本组已完成。'
+    } else message.value = result?.message ?? '这次没有记录完成，请重试。'
+  } catch {
+    if (!disposed && request === generation) message.value = '没能记录本组完成情况，请重试。'
+  } finally { phase.value = 'idle' }
+}
 const simpleCommand = async (text: string): Promise<boolean> => {
   const command = text.replace(/[，,。.!！?？\s]/g, '')
+  if (/^(完成本组|完成这一组|本组完成了|这组完成了|这一组完成了)$/.test(command)) { await completeCurrentSet(); return true }
   if (/^(关闭免手模式|关闭语音唤醒)$/.test(command)) { disableHandsfree(); return true }
   if (/^(暂停|暂停训练|休息一下)$/.test(command)) { message.value = '训练已暂停。'; return true }
   if (/^(继续|继续训练)$/.test(command)) { resumeTraining(); return true }
@@ -335,12 +382,15 @@ const close = () => {
 }
 const hide = () => { if (document.hidden) { disableHandsfree(); close() } }
 document.addEventListener('visibilitychange', hide)
-watch(() => item.value?.id, () => { cancel(); instruction.value = ''; message.value = ''; listen() })
+watch(() => item.value?.id, () => {
+  if (phase.value === 'completing') return
+  cancel(); instruction.value = ''; message.value = ''; listen()
+})
 onBeforeUnmount(() => { disposed = true; disableHandsfree(); cancel(); props.video?.removeEventListener('timeupdate', onVideoTime); document.removeEventListener('visibilitychange', hide) })
 </script>
 
 <template>
-  <section v-if="item" class="playback-controls" aria-label="TrainPal 语音助手">
+  <section v-if="item" class="playback-controls" :class="{ 'playback-controls--immersive': immersive }" aria-label="TrainPal 语音助手">
     <div v-show="!expanded" class="voice-entry-row">
       <div class="voice-shortcut">
         <button ref="entry" type="button" class="voice-entry" aria-label="跟我说" aria-haspopup="dialog" :aria-expanded="expanded" @click="speakOnce">
@@ -348,7 +398,7 @@ onBeforeUnmount(() => { disposed = true; disableHandsfree(); cancel(); props.vid
           <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="13" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8" /></svg>
           <span>跟我说</span>
         </button>
-        <small>{{ handsfree ? '喊 TrainPal 也可以' : item.sourceRef ? '重看讲解、暂停训练' : '暂停、继续，听你说' }}</small>
+        <small>{{ handsfree ? '喊 TrainPal 也可以' : item.sourceRef ? '完成本组、重看讲解' : '完成本组、暂停或继续' }}</small>
       </div>
       <button type="button" class="wake-switch" :aria-pressed="handsfree" :disabled="wakeSetup === 'checking' || wakeSetup === 'installing'" @click="openWakeSettings">
         <i aria-hidden="true" />语音唤醒 · {{ handsfree ? '开' : '关' }}
@@ -356,7 +406,7 @@ onBeforeUnmount(() => { disposed = true; disableHandsfree(); cancel(); props.vid
     </div>
     <p v-if="message && !expanded" class="entry-feedback" role="status">{{ message }}</p>
     <p v-if="wakeStatus && !handsfree && !expanded" class="entry-feedback" role="status">{{ wakeStatus }}</p>
-    <dialog ref="sheet" class="voice-sheet" aria-labelledby="voice-title" @cancel.prevent="close">
+    <dialog ref="sheet" class="voice-sheet" aria-labelledby="voice-title" @cancel.stop.prevent="close" @keydown.stop>
       <div v-if="expanded" class="voice-panel">
         <div class="sheet-handle" aria-hidden="true" />
         <header class="voice-heading">
@@ -365,7 +415,7 @@ onBeforeUnmount(() => { disposed = true; disableHandsfree(); cancel(); props.vid
           <button type="button" class="close-sheet" aria-label="关闭 TrainPal" autofocus @click="close"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
         </header>
         <template v-if="voiceNotice">
-          <p class="voice-help">{{ noticeMode === 'wake' ? '开启后，喊“TrainPal”再说需求。切走页面后需要重新开启。' : item.sourceRef ? '说一句“重看呼吸讲解”，我来帮你找。' : '可以说“暂停”或“继续训练”。' }}</p>
+          <p class="voice-help">{{ noticeMode === 'wake' ? '开启后，可以说“TrainPal，完成本组”。切走页面后需要重新开启。' : item.sourceRef ? '可以说“完成本组”，或“重看呼吸讲解”。' : '可以说“完成本组”“暂停”或“继续训练”。' }}</p>
           <div class="voice-actions">
             <template v-if="noticeMode === 'wake'">
               <button v-if="wakeSetup === 'download'" type="button" class="primary" @click="activateHandsfree(true)">下载并开启</button>
@@ -383,9 +433,9 @@ onBeforeUnmount(() => { disposed = true; disableHandsfree(); cancel(); props.vid
           <p v-if="instruction" class="heard-instruction">{{ instruction }}</p>
           <button type="button" @click="cancel(); textEntry = true; stopListening()">用文字</button>
         </div>
-        <div v-else-if="phase === 'finding' || phase === 'saving'" class="finding-state" role="status">
+        <div v-else-if="phase === 'finding' || phase === 'saving' || phase === 'completing'" class="finding-state" role="status">
           <span class="finding-dots" aria-hidden="true">···</span>
-          <p>{{ phase === 'saving' ? '正在保存你的选择…' : '正在找这段讲解…' }}</p>
+          <p>{{ phase === 'completing' ? '正在记录本组完成情况…' : phase === 'saving' ? '正在保存你的选择…' : '正在找这段讲解…' }}</p>
         </div>
         <template v-else-if="proposal">
           <div class="clip-proposal">
@@ -399,7 +449,7 @@ onBeforeUnmount(() => { disposed = true; disableHandsfree(); cancel(); props.vid
           <small v-if="handsfree" class="voice-confirmation">也可以说“TrainPal，确认”</small>
         </template>
         <template v-else>
-          <p v-if="!textEntry" class="voice-help">{{ item.sourceRef ? '重看讲解、回退视频，或暂停训练。' : '可以说“暂停”或“继续训练”。' }}</p>
+          <p v-if="!textEntry" class="voice-help">{{ item.sourceRef ? '完成本组、重看讲解，或暂停训练。' : '可以说“完成本组”“暂停”或“继续训练”。' }}</p>
           <div class="voice-actions">
             <button type="button" class="primary" :disabled="training.commandLocked" @click="speakOnce">点一下说话</button>
             <button type="button" :aria-expanded="textEntry" @click="textEntry = !textEntry">{{ textEntry ? '收起文字' : '用文字' }}</button>
@@ -422,7 +472,7 @@ onBeforeUnmount(() => { disposed = true; disableHandsfree(); cancel(); props.vid
             </div>
           </details>
         </div>
-        <button v-if="!voiceNotice && phase !== 'saving'" type="button" class="cancel-request" @click="close">取消</button>
+        <button v-if="!voiceNotice && phase !== 'saving' && phase !== 'completing'" type="button" class="cancel-request" @click="close">取消</button>
       </div>
     </dialog>
   </section>
@@ -442,6 +492,15 @@ onBeforeUnmount(() => { disposed = true; disableHandsfree(); cancel(); props.vid
 .wake-switch[aria-pressed="true"] { color: var(--tp-primary-readable); }
 .wake-switch[aria-pressed="true"] i { background: currentColor; }
 .entry-feedback { font-size: 12px; margin: 0 0 8px; color: var(--tp-muted); }
+.playback-controls--immersive { color: white; }
+.playback-controls--immersive .voice-entry-row { padding: 8px 0 0; }
+.playback-controls--immersive .voice-shortcut > small { display: none; }
+.playback-controls--immersive .voice-entry { background: #243e51; color: white; box-shadow: none; padding: 6px 12px; }
+.playback-controls--immersive .voice-entry :deep(.trainpal-coach) { margin: -8px -2px -4px -7px; }
+.playback-controls--immersive .voice-entry :deep(.trainpal-coach__image) { width: 36px; height: 42px; }
+.playback-controls--immersive .voice-entry svg, .playback-controls--immersive .wake-switch[aria-pressed="true"] { color: #51e5d6; }
+.playback-controls--immersive .wake-switch, .playback-controls--immersive .entry-feedback { color: #bed0de; }
+.playback-controls--immersive .entry-feedback { margin: 6px 0 0; }
 .voice-sheet { position: fixed; inset: auto 0 0; width: min(100%, 540px); max-width: 100%; max-height: min(72dvh, 640px); margin: auto auto 0; padding: 0; border: 1px solid var(--tp-line); border-bottom: 0; border-radius: 24px 24px 0 0; background: var(--tp-surface); color: var(--tp-ink); overscroll-behavior: contain; }
 .voice-sheet::backdrop { background: rgb(21 46 67 / 18%); }
 .voice-panel { padding: 10px 20px max(20px, env(safe-area-inset-bottom)); }

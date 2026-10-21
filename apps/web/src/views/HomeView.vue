@@ -5,7 +5,6 @@ import { useRouter } from 'vue-router'
 import { analysisClient, browserEventStreamFactory } from '@/api/client'
 import {
   localMediaAsFile,
-  effectiveLocalUploadMaxBytes,
   probeVideoDuration,
   validateLocalMediaFile,
   validateLocalMediaUpload,
@@ -17,6 +16,7 @@ import { useDraftStore } from '@/stores/draft'
 import { useLibraryStore } from '@/stores/library'
 import { useLocalMediaStore } from '@/stores/local-media'
 import CoachMotion from '@/features/experience/CoachMotion.vue'
+import VideoPlayer from '@/features/experience/VideoPlayer.vue'
 
 const router = useRouter()
 const analysis = useAnalysisStore()
@@ -47,14 +47,15 @@ const quickRealDialogFocus = useDialogFocus(quickRealDialog)
 
 const current = computed(() => localMedia.current)
 const previewUrl = computed(() => current.value ? localMedia.urlFor(current.value.sourceId) : null)
-const canStart = computed(() => {
-  if (!current.value || !analysis.capabilities || analysis.isRunning) return false
+const currentValidation = computed(() => {
+  if (!current.value || !analysis.capabilities) return null
   return validateLocalMediaFile(
     localMediaAsFile(current.value),
     current.value.durationSeconds,
     analysis.capabilities,
-  ).ok
+  )
 })
+const canStart = computed(() => currentValidation.value?.ok === true && !analysis.isRunning)
 const quickRealSources = computed(() => [...analysis.sources]
   .sort((left, right) => (
     left.duration_seconds - right.duration_seconds || left.id.localeCompare(right.id)
@@ -68,25 +69,16 @@ const formatTime = (seconds: number): string => {
 
 const formatSize = (bytes: number): string => `${(bytes / 1_000_000).toFixed(1)} MB`
 
-const formatDurationLimit = (seconds: number): string => {
-  const whole = Math.max(0, Math.floor(seconds))
-  const minutes = Math.floor(whole / 60)
-  const remainder = whole % 60
-  if (!minutes) return `${remainder} 秒`
-  if (!remainder) return `${minutes} 分钟`
-  return `${minutes} 分 ${remainder} 秒`
-}
-
 const formatRoundedDuration = (seconds: number): string => formatTime(Math.round(seconds))
 
 const formatRoundedMinutes = (seconds: number): number => Math.max(1, Math.round(seconds / 60))
 
-const capabilityCopy = computed(() => {
-  const capability = analysis.capabilities
-  if (analysis.capabilitiesLoading) return '正在读取当前分析能力…'
-  if (!capability) return '暂时无法确认本地视频能力'
-  if (!capability.local_upload_enabled) return '当前环境暂不支持本地视频分析'
-  return `最长 ${formatDurationLimit(capability.local_analysis_max_seconds)} · 最大 ${formatSize(effectiveLocalUploadMaxBytes(capability))} · 结果需要核对`
+const availabilityError = computed(() => {
+  if (analysis.capabilitiesLoading) return ''
+  if (!analysis.capabilities) return '暂时无法分析视频，请重试。'
+  if (!analysis.capabilities.local_upload_enabled) return '视频分析暂不可用，请稍后重试。'
+  if (currentValidation.value?.ok === false) return currentValidation.value.message
+  return ''
 })
 
 const initialize = async (): Promise<void> => {
@@ -214,7 +206,7 @@ onMounted(initialize)
       <h2 id="import-title" class="tp-visually-hidden">从一个视频开始</h2>
 
       <div v-if="current && previewUrl" class="video-ticket tp-card">
-        <video :src="previewUrl" controls preload="metadata" aria-label="已选择的视频预览" />
+        <VideoPlayer :src="previewUrl" label="已选择的视频预览" />
         <div class="ticket-copy">
           <div>
             <small>本机视频</small>
@@ -241,8 +233,7 @@ onMounted(initialize)
         <small v-if="!current">选择你有权使用的视频</small>
       </label>
 
-      <p class="capability-copy">{{ capabilityCopy }}</p>
-      <details class="capability-copy"><summary>视频与隐私</summary><p>开始分析后，视频会上传用于识别动作，处理后删除上传的副本。原视频保存在这台设备。</p></details>
+      <p v-if="availabilityError" class="form-error" role="status">{{ availabilityError }}</p>
       <p v-if="importError" class="form-error" role="alert">{{ importError }}</p>
       <p v-if="analysis.isRunning" class="analysis-running-note" role="status">
         当前已有分析正在进行。请先查看进度，或在分析页明确取消后再开始新的分析。
@@ -265,7 +256,7 @@ onMounted(initialize)
         type="button"
         @click="analysis.loadCapabilities(analysisClient)"
       >
-        重新读取分析能力
+        重试
       </button>
     </section>
 
@@ -275,7 +266,7 @@ onMounted(initialize)
       <button class="quick-preset" type="button" :disabled="quickPlanPending" @click="useQuickPlan"><strong>{{ quickPlanPending ? '正在载入…' : '查看预设方案' }}</strong><small>直接调整并开练 · 产品示例</small><span aria-hidden="true">›</span></button>
       <details v-if="quickRealSources.length" class="quick-video-branch">
         <summary>体验视频分析 <span aria-hidden="true">⌄</span></summary>
-        <p>选择一段已授权视频开始 AI 分析，结果需要核对。</p>
+        <p>选择视频，让 TrainPal 整理成训练方案。</p>
         <div class="quick-real-sources" aria-label="按时长排序的示例视频">
           <button
             v-for="source in quickRealSources"
@@ -373,7 +364,6 @@ onMounted(initialize)
 .section-line h2 { margin: 3px 0 0; color: var(--tp-ink); font: 700 28px/1 var(--font-display), var(--font-cn); }
 
 .video-ticket { overflow: hidden; }
-.video-ticket video { display: block; width: 100%; max-height: min(46dvh, 430px); aspect-ratio: 4 / 3; object-fit: contain; background: var(--tp-media-canvas); }
 .ticket-copy { display: grid; gap: 13px; padding: 15px 16px; }
 .ticket-copy > div { display: grid; gap: 3px; min-width: 0; }
 .ticket-copy small { color: var(--tp-primary-readable); font: 700 11px/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; }
@@ -392,7 +382,6 @@ onMounted(initialize)
 .file-picker--secondary { min-height: 50px; flex-direction: row; padding: 0 12px; border-color: var(--tp-line); color: var(--tp-ink); background: transparent; }
 .file-picker--secondary b { width: auto; color: var(--tp-ink); background: transparent; }
 .file-picker--secondary > span { border-color: var(--tp-line); font-size: 18px; }
-.capability-copy { margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.6; }
 .form-error { margin: 0; color: var(--tp-danger); font-size: 13px; line-height: 1.5; }
 .analysis-running-note { margin: 0; color: var(--tp-primary-readable); font-size: 12px; line-height: 1.6; }
 .start-analysis { width: 100%; min-height: 58px; margin-top: 4px; }
@@ -456,10 +445,10 @@ onMounted(initialize)
 .section-line h2 { font-family: var(--font-cn); font-size: 18px; }
 .file-picker { min-height: 200px; border-color: var(--tp-line); gap: 12px; }
 .file-picker--secondary { min-height: 48px; }
-.video-ticket { display: grid; grid-template-columns: minmax(110px, .9fr) minmax(0, 1.1fr); align-items: center; padding: 10px; background: var(--tp-surface-raised); }
-.video-ticket video { aspect-ratio: 4 / 3; border-radius: 8px; max-height: 170px; }
-.ticket-copy { display: grid; grid-template-columns: 1fr; padding: 8px 0 8px 12px; }
-.ticket-copy dl { display: grid; gap: 5px; }
+.video-ticket { display: grid; padding: 0; background: var(--tp-surface); }
+.ticket-copy { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 14px; }
+.ticket-copy dl { display: flex; gap: 12px; }
+.ticket-copy dt { display: none; }
 .brand-row { margin-bottom: 6px; color: var(--tp-ink); font-size: 28px; font-weight: 750; }
 .start-analysis { min-height: 52px; }
 

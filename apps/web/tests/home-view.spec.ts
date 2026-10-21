@@ -60,12 +60,20 @@ describe('TrainPal 首页', () => {
     expect(wrapper.text()).not.toContain('不是看完一条视频')
     expect(wrapper.text()).not.toContain('带来你的参考')
     expect(wrapper.text()).not.toContain('每个关键判断')
-    expect(wrapper.text()).toContain('最长 1 分钟')
-    expect(wrapper.text()).toContain('结果需要核对')
-    expect(wrapper.text()).toContain('最大 25.0 MB')
-    expect(wrapper.text()).toContain('原视频保存在这台设备。')
+    expect(wrapper.text()).not.toContain('最长 1 分钟')
+    expect(wrapper.text()).not.toContain('结果需要核对')
+    expect(wrapper.text()).not.toContain('最大 25.0 MB')
+    expect(wrapper.text()).not.toContain('原视频保存在这台设备。')
     expect(wrapper.get('video').attributes('src')).toBe('blob:home-fixture')
     expect(start).not.toHaveBeenCalled()
+
+    localMedia.current = { ...record, durationSeconds: 120 }
+    await flushPromises()
+    expect(wrapper.get('.start-analysis').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('视频过长，请截取 1 分钟以内的片段再选择')
+    localMedia.current = record
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('视频过长')
 
     analysis.status = 'running'
     await flushPromises()
@@ -127,8 +135,8 @@ describe('TrainPal 首页', () => {
 
     expect(wrapper.get('.quick-real-section > summary').text()).toContain('快速开始')
     expect(wrapper.get('.quick-real-section').attributes('open')).toBeUndefined()
-    expect(wrapper.text()).toContain('最长 5 分钟')
-    expect(wrapper.text()).toContain('最大 268.4 MB')
+    expect(wrapper.text()).not.toContain('最长 5 分钟')
+    expect(wrapper.text()).not.toContain('最大 268.4 MB')
     expect(wrapper.text()).not.toContain('评委入口')
     expect(wrapper.text()).not.toContain('体验码')
     expect(wrapper.findAll('.quick-real-source').map((source) => source.text())).toEqual([

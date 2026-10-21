@@ -1,11 +1,9 @@
 import { expect, test } from '@playwright/test'
 import { fileURLToPath } from 'node:url'
 
-const localVideoPath = fileURLToPath(
-  new URL('../../../../tmp/e2e-source.mp4', import.meta.url),
-)
-
-test('local video survives analysis, plan preview, and training recovery', async ({ page }) => {
+for (const localFileName of ['e2e-source.mp4', 'e2e-landscape.mp4']) {
+  const localVideoPath = fileURLToPath(new URL(`../../../../tmp/${localFileName}`, import.meta.url))
+  test(`${localFileName} survives analysis, plan preview, and training recovery`, async ({ page }) => {
   await page.goto('/')
 
   const localFileInput = page.locator('.file-picker input[type="file"]')
@@ -23,7 +21,7 @@ test('local video survives analysis, plan preview, and training recovery', async
   const firstPlanCard = page.locator('.plan-card').first()
   await firstPlanCard.locator('.action-summary').click()
   await page.locator('[data-full-editor]').click()
-  await expect(page.getByText(/本地视频 · e2e-source\.mp4/)).toBeVisible()
+  await expect(page.getByText(`本地视频 · ${localFileName}`, { exact: false })).toBeVisible()
   const confirmationSheet = page.locator('.action-sheet')
   await confirmationSheet.getByRole('button', { name: '确认并加入' }).click()
   await expect(confirmationSheet).toBeHidden()
@@ -35,7 +33,7 @@ test('local video survives analysis, plan preview, and training recovery', async
   await page.reload()
   await page.locator('.plan-card').first().locator('.action-summary').click()
   await page.locator('[data-full-editor]').click()
-  await expect(page.getByText(/本地视频 · e2e-source\.mp4/)).toBeVisible()
+  await expect(page.getByText(`本地视频 · ${localFileName}`, { exact: false })).toBeVisible()
   await page.getByRole('button', { name: '预览来源视频' }).click()
   await expect(page.locator('.local-preview video')).toHaveAttribute('src', /^blob:/)
 
@@ -48,6 +46,9 @@ test('local video survives analysis, plan preview, and training recovery', async
   await expect(page).toHaveURL(/\/training$/)
   await expect(page.getByRole('heading', { name: '拖拽弯举' })).toBeVisible()
   await expect(page.locator('.media-stage video')).toHaveAttribute('src', /^blob:/)
+  const player = page.locator('.media-stage .video-player')
+  await expect.poll(() => player.locator('video').evaluate(element => (element as HTMLVideoElement).videoWidth)).toBe(localFileName === 'e2e-source.mp4' ? 390 : 960)
+  await expect(player).toHaveClass(localFileName === 'e2e-source.mp4' ? /video-player--portrait/ : /^(?!.*video-player--portrait).*$/)
   await page.getByRole('button', { name: '准备好了' }).click()
   await expect(page.getByText('本组进行中', { exact: true }).first()).toBeVisible()
 
@@ -58,3 +59,4 @@ test('local video survives analysis, plan preview, and training recovery', async
   await page.getByRole('button', { name: '完成本组' }).click()
   await expect(page.getByRole('heading', { name: '训练完成' })).toBeVisible()
 })
+}

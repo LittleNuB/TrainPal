@@ -31,6 +31,8 @@ type VersionedCommand = {
   expectedRevision: number
 }
 
+export type TrainingSetConfirmation = VersionedCommand & { itemId: string; setIndex: number }
+
 export type TrainingCommand =
   | { type: 'session.create'; plan: PlanSnapshot; coachStyleId: CoachStyleId | null; flowVersion?: 'watch-v1' }
   | ({ type: 'set.prepare' } & VersionedCommand)
@@ -38,7 +40,7 @@ export type TrainingCommand =
   | ({ type: 'set.start' } & VersionedCommand)
   | ({ type: 'clock.tick' } & VersionedCommand)
   | ({ type: 'session.pause'; reason: 'user' | 'page_hidden' } & VersionedCommand)
-  | ({ type: 'set.complete' } & VersionedCommand)
+  | ({ type: 'set.complete'; pausedSet?: { itemId: string; setIndex: number } } & VersionedCommand)
   | ({ type: 'rest.continue' } & VersionedCommand)
   | ({ type: 'action.skip' } & VersionedCommand)
   | ({ type: 'session.end_early' } & VersionedCommand)
@@ -537,10 +539,16 @@ export const createTrainingEngine = ({
     }
 
     if (command.type === 'set.complete') {
-      if (previous.status !== 'active') {
+      const item = previous.plan.items[previous.currentItemIndex]
+      const confirmation = command.pausedSet
+      if (confirmation && (confirmation.itemId !== item.id || confirmation.setIndex !== previous.currentSetIndex)) {
+        return failure('invalid_transition', '这一组的进度已变化，请重新发出指令', previous)
+      }
+      const confirmedPausedSet = confirmation && previous.status === 'paused'
+        && previous.pauseReason === 'user' && !previous.pendingCountdown && !(previous.pausedRestSeconds ?? 0)
+      if (previous.status !== 'active' && !confirmedPausedSet) {
         return failure('invalid_transition', '当前没有正在执行的一组', previous)
       }
-      const item = previous.plan.items[previous.currentItemIndex]
       if (item.mode !== 'reps') {
         return failure('invalid_transition', '时长型动作会在倒计时结束时完成', previous)
       }

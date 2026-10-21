@@ -178,6 +178,20 @@ describe('training store command serialization', () => {
     expect(store.session).toMatchObject({ status: 'paused', pauseReason: 'page_hidden' })
   })
 
+  it('keeps the explicitly confirmed set revision when queued behind another command', async () => {
+    const engine = new DeferredTickEngine()
+    const store = useTrainingStore()
+    await store.load(engine)
+    const ticking = store.tick()
+    await Promise.resolve()
+    const completing = store.completeSet({ sessionId: 'session-1', expectedRevision: 1, itemId: 'curl', setIndex: 0 })
+    engine.resolveTick()
+    await ticking
+    await completing
+    expect(engine.commands[1]).toEqual({ type: 'set.complete', sessionId: 'session-1', expectedRevision: 1,
+      pausedSet: { itemId: 'curl', setIndex: 0 } })
+  })
+
   it('marks quick experience and linked plans in the immutable snapshot', async () => {
     const engine = new DeferredTickEngine()
     const store = useTrainingStore()

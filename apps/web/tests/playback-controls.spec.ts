@@ -38,7 +38,8 @@ const setup = () => {
   vi.spyOn(useLibraryStore(), 'reload').mockResolvedValue()
   vi.spyOn(useLibraryStore(), 'refreshHistory').mockResolvedValue()
   const save = vi.spyOn(training, 'selectPlayback').mockResolvedValue({ ok: true, session: training.session, record: null, events: [] })
-  const wrapper = mount(PlaybackControls, { props: { video: null } })
+  const complete = vi.fn().mockResolvedValue({ ok: true, session: { ...training.session, status: 'resting' }, record: null, events: [] })
+  const wrapper = mount(PlaybackControls, { props: { video: null, completeSet: complete } })
   const button = (label: string) => wrapper.findAll('button').find((entry) => entry.text() === label)!
   const propose = async (text = '完整教学') => {
     if (!wrapper.find('.voice-panel').exists()) await button('跟我说').trigger('click')
@@ -47,10 +48,148 @@ const setup = () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
   }
-  return { training, wrapper, button, propose, save }
+  return { training, wrapper, button, propose, save, complete }
 }
 
 describe('bounded playback controls', () => {
+  it('records a woken set once and closes the sheet into rest without a model call or resume', async () => {
+    const { wrapper, button, training, complete } = setup()
+    training.currentItem!.mode = 'reps'
+    training.session!.pauseReason = 'user'
+    let listener!: Parameters<typeof startLocalWake>[0]
+    vi.mocked(localWakeAvailability).mockResolvedValue('available')
+    vi.mocked(startLocalWake).mockImplementation(callbacks => { listener = callbacks; return vi.fn() })
+    vi.mocked(requestPlaybackChoice).mockClear()
+    await button('语音唤醒 · 关').trigger('click')
+    await button('开启语音唤醒').trigger('click')
+    await flushPromises()
+    await wrapper.get('[aria-label="关闭 TrainPal"]').trigger('click')
+    const original = listener
+    original.onWake()
+    original.onCommand('完成本组')
+    original.onCommand('完成本组')
+    await flushPromises()
+    expect(complete).toHaveBeenCalledExactlyOnceWith({ sessionId: 'session', expectedRevision: 1, itemId: training.currentItem!.id, setIndex: 0 })
+    expect(wrapper.find('.voice-panel').exists()).toBe(false)
+    expect(wrapper.text()).toContain('本组已完成，休息一下。')
+    expect(wrapper.text()).toContain('语音唤醒 · 开')
+    expect(wrapper.emitted('resume')).toBeUndefined()
+    expect(requestPlaybackChoice).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it.each(['rest', 'countdown', 'before_start', 'duration'] as const)('does not complete a %s state from a voice command', async state => {
+    const { wrapper, training, complete, propose } = setup()
+    training.currentItem!.mode = 'reps'
+    training.session!.pauseReason = state === 'before_start' ? 'before_start' : 'user'
+    if (state === 'rest') training.session!.pausedRestSeconds = 12
+    if (state === 'countdown') training.session!.pendingCountdown = true
+    if (state === 'duration') training.session!.plan.items[0]!.mode = 'duration'
+    vi.mocked(requestPlaybackChoice).mockClear()
+    await propose('完成本组')
+    expect(complete).not.toHaveBeenCalled()
+    expect(requestPlaybackChoice).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain(state === 'duration' ? '倒计时结束后自动完成' : '当前没有正在进行的一组')
+    wrapper.unmount()
+  })
+
+  it('ignores a completion command arriving after the page is hidden', async () => {
+    const { wrapper, button, training, complete } = setup()
+    training.currentItem!.mode = 'reps'
+    training.session!.pauseReason = 'user'
+    let listener!: Parameters<typeof startLocalWake>[0]
+    vi.mocked(localWakeAvailability).mockResolvedValue('available')
+    vi.mocked(startLocalWake).mockImplementation(callbacks => { listener = callbacks; return vi.fn() })
+    await button('语音唤醒 · 关').trigger('click')
+    await button('开启语音唤醒').trigger('click')
+    await flushPromises()
+    const original = listener
+    original.onWake()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    document.dispatchEvent(new Event('visibilitychange'))
+    original.onCommand('完成本组')
+    await flushPromises()
+    expect(complete).not.toHaveBeenCalled()
+    expect(wrapper.find('.voice-panel').exists()).toBe(false)
+    expect(wrapper.emitted('handsfree')?.at(-1)).toEqual([false])
+    wrapper.unmount()
+  })
+
+  it('does not complete a set that only started while the wake pause was pending', async () => {
+    const { wrapper, training, complete, propose } = setup()
+    training.currentItem!.mode = 'reps'
+    training.session!.status = 'countdown'
+    training.session!.pendingCountdown = true
+    vi.spyOn(training, 'pause').mockImplementation(async () => {
+      training.session!.status = 'paused'
+      training.session!.pauseReason = 'user'
+      training.session!.pendingCountdown = false
+      training.session!.revision++
+      return { ok: true, session: training.session, record: null, events: [] }
+    })
+    await propose('完成本组')
+    expect(complete).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('当前没有正在进行的一组')
+    wrapper.unmount()
+  })
+
+  it('keeps failure visible and ignores completion after the target set changes during pause', async () => {
+    const { wrapper, training, complete, propose, button } = setup()
+    training.currentItem!.mode = 'reps'
+    training.session!.pauseReason = 'user'
+    complete.mockResolvedValue({ ok: false, code: 'storage_unavailable', message: '本组暂时无法保存', session: training.session })
+    await propose('完成本组')
+    expect(wrapper.text()).toContain('本组暂时无法保存')
+    expect(wrapper.find('.voice-panel').exists()).toBe(true)
+    await wrapper.get('[aria-label="关闭 TrainPal"]').trigger('click')
+    complete.mockClear()
+    training.session!.status = 'active'
+    let finish!: () => void
+    const paused = new Promise<void>(resolve => { finish = resolve })
+    vi.spyOn(training, 'pause').mockImplementation(async () => {
+      await paused
+      training.session!.currentSetIndex = 1
+      training.session!.status = 'paused'
+      return { ok: true, session: training.session, record: null, events: [] }
+    })
+    await button('跟我说').trigger('click')
+    await button('用文字').trigger('click')
+    await wrapper.get('input').setValue('完成本组')
+    await wrapper.get('form').trigger('submit')
+    finish()
+    await flushPromises()
+    expect(complete).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+  it('preserves the same wake listener and an in-flight command across video expansion', async () => {
+    const { wrapper, button } = setup()
+    let listener!: Parameters<typeof startLocalWake>[0]
+    const stop = vi.fn()
+    vi.mocked(localWakeAvailability).mockResolvedValue('available')
+    vi.mocked(startLocalWake).mockImplementation(callbacks => { listener = callbacks; callbacks.onReady(); return stop })
+    await button('语音唤醒 · 关').trigger('click')
+    await button('开启语音唤醒').trigger('click')
+    await flushPromises()
+    await wrapper.get('[aria-label="关闭 TrainPal"]').trigger('click')
+    const previous = listener
+    stop.mockClear()
+    previous.onWake()
+    await flushPromises()
+    await wrapper.setProps({ immersive: true })
+    expect(stop).not.toHaveBeenCalled()
+    expect(listener).toBe(previous)
+    previous.onCommand('继续训练')
+    await flushPromises()
+    expect(wrapper.emitted('resume')).toHaveLength(1)
+    expect(wrapper.find('.voice-panel').exists()).toBe(false)
+    const current = listener
+    stop.mockClear()
+    await wrapper.setProps({ immersive: false })
+    expect(listener).toBe(current)
+    expect(stop).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('语音唤醒 · 开')
+    wrapper.unmount()
+  })
   it('reports unavailable rewind without video and seeks only inside the current clip', async () => {
     const { wrapper, propose } = setup()
     await propose('回退 5 秒')

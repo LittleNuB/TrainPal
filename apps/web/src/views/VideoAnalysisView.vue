@@ -13,6 +13,7 @@ import type {
 import { useAnalysisStore } from '@/stores/analysis'
 import { useDraftStore } from '@/stores/draft'
 import { useLocalMediaStore } from '@/stores/local-media'
+import VideoPlayer from '@/features/experience/VideoPlayer.vue'
 
 type ProposalStrategy = 'append' | 'replace'
 
@@ -271,14 +272,11 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
           <h1 id="source-title">{{ sourceTitle }}</h1>
           <p>{{ sourceKind === 'local' ? '本机视频' : '示例视频' }} · {{ formatTime(sourceDuration) }}</p>
         </div>
-        <video
+        <VideoPlayer
           v-if="mediaUrl"
-          ref="video"
+          @update:element="video = $event"
           :src="mediaUrl"
-          controls
-          playsinline
-          preload="metadata"
-          aria-label="当前分析来源预览"
+          label="当前分析来源预览"
           @error="mediaLoadFailed = true"
         />
         <div v-else class="media-placeholder">
@@ -500,7 +498,6 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
 .source-copy { display: grid; gap: 5px; padding: 17px 18px; }
 .source-copy h1 { overflow: hidden; margin: 0; color: var(--tp-ink); font-size: clamp(20px, 6vw, 30px); text-overflow: ellipsis; white-space: nowrap; }
 .source-copy > p:last-child { margin: 0; color: var(--tp-muted); font-size: 12px; }
-.source-preview video { display: block; width: 100%; max-height: min(42dvh, 420px); aspect-ratio: 16 / 9; object-fit: contain; background: var(--tp-media-canvas); }
 .media-placeholder { display: grid; min-height: 180px; place-items: center; padding: 24px; color: var(--tp-muted); background: var(--tp-sage-surface); text-align: center; }
 .media-placeholder span { font-size: 32px; }
 .media-placeholder p { margin: 8px 0 0; font-size: 12px; }
@@ -572,7 +569,7 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
 
 @media (min-width: 768px) {
   .source-preview { grid-template-columns: minmax(0, 1fr) minmax(320px, 1.25fr); align-items: center; }
-  .source-preview video,
+  .source-preview .video-player,
   .media-placeholder { grid-column: 2; grid-row: 1; min-height: 250px; }
   .source-copy { padding: 28px; }
   .completion-card { padding: 28px; }
@@ -587,7 +584,6 @@ const handleProposalDialogKeydown = (event: KeyboardEvent): void => {
   .analysis-header { grid-column: 1 / -1; }
   .source-preview { grid-column: 1; display: flex; flex-direction: column; }
   .source-copy { width: 100%; padding: 22px; }
-  .source-preview video { max-height: 420px; }
   .state-card, .progress-card, .completion-card { grid-column: 2; }
   .source-error { grid-column: 1 / -1; }
 }

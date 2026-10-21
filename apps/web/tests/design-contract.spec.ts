@@ -114,8 +114,8 @@ describe('web experience design contract', () => {
   })
 
   it('keeps training reference video visible without cropping', () => {
-    const trainingView = readFileSync(resolve(sourceRoot, 'views/TrainingView.vue'), 'utf8')
-    const videoRule = trainingView.match(/\.media-stage\s+video\s*\{([^}]*)\}/)
+    const videoPlayer = readFileSync(resolve(sourceRoot, 'features/experience/VideoPlayer.vue'), 'utf8')
+    const videoRule = videoPlayer.match(/\.video-canvas\s+video\s*\{([^}]*)\}/)
 
     expect(videoRule).not.toBeNull()
     expect(videoRule?.[1]).toMatch(/object-fit\s*:\s*contain/)

@@ -11,7 +11,9 @@ from hakimi_analysis.settings import PROJECT_ROOT
 E2E_SOURCE_DURATIONS = (2, 3, 4, 5, 6)
 
 
-async def create_video(output: Path, *, duration_seconds: int = 4) -> None:
+async def create_video(
+    output: Path, *, duration_seconds: int = 4, dimensions: str = "390x694"
+) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     executable = imageio_ffmpeg.get_ffmpeg_exe()
     process = await asyncio.create_subprocess_exec(
@@ -22,7 +24,7 @@ async def create_video(output: Path, *, duration_seconds: int = 4) -> None:
         "-f",
         "lavfi",
         "-i",
-        "color=c=0x101820:s=390x694:r=15",
+        f"color=c=0x52bac9:s={dimensions}:r=15,drawgrid=w=iw/6:h=ih/10:t=2:c=white@0.4",
         "-f",
         "lavfi",
         "-i",
@@ -72,6 +74,7 @@ async def prepare_e2e_media() -> None:
         encoding="utf-8",
     )
     shutil.copyfile(output_root / "e2e-source-03.mp4", PROJECT_ROOT / "tmp" / "e2e-source.mp4")
+    await create_video(PROJECT_ROOT / "tmp" / "e2e-landscape.mp4", dimensions="960x540")
 
 
 if __name__ == "__main__":
