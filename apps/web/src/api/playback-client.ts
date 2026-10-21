@@ -1,3 +1,5 @@
+import { apiFailure } from './failure'
+import { appUrl } from './url'
 import { UserMessageError } from '@/domain/user-message'
 import type { PlaybackOption } from '@/domain/playback'
 import type { operations } from '@/api/schema'
@@ -5,9 +7,9 @@ import type { operations } from '@/api/schema'
 type PlaybackRequest = operations['select_playback_api_v1_playback_adjustments_post']['requestBody']['content']['application/json']
 
 const post = async (path: string, body: BodyInit, signal: AbortSignal, contentType: string): Promise<unknown> => {
-  const response = await fetch(`/api/v1/${path}`, { method: 'POST', body, signal,
+  const response = await fetch(appUrl(`/api/v1/${path}`), { method: 'POST', body, signal,
     credentials: 'same-origin', headers: { 'Content-Type': contentType } })
-  if (!response.ok) throw new UserMessageError('TrainPal 暂时没能完成查找，原片段保持不变。可以重试或手动播放。')
+  if (!response.ok) throw await apiFailure(response, new UserMessageError('TrainPal 暂时没能完成查找，原片段保持不变。可以重试或手动播放。'))
   return response.json()
 }
 

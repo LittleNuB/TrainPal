@@ -1,3 +1,4 @@
+import { appUrl } from '@/api/url'
 import type { PetState } from '@/features/experience/pet-state'
 
 export const COACH_STYLE_IDS = [
@@ -78,7 +79,7 @@ const sessionCompletedActions = {
 export function coachFrameUrls(styleId: CoachStyleId, action: CoachAction): string[] {
   return Array.from(
     { length: 6 },
-    (_, index) => `/trainpal/pets/${styleId}/${action}/${String(index + 1).padStart(2, '0')}.webp`,
+    (_, index) => appUrl(`/trainpal/pets/${styleId}/${action}/${String(index + 1).padStart(2, '0')}.webp`),
   )
 }
 

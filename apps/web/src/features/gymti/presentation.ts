@@ -1,3 +1,4 @@
+import { appUrl } from '@/api/url'
 import {
   COACH_STYLE_IDS,
   COACH_STYLE_LABELS,
@@ -50,6 +51,7 @@ export const GYMTI_TYPE_PRESENTATION = Object.fromEntries(
     {
       label,
       ...gymtiTypeCopy[id],
+      illustrationUrl: appUrl(gymtiTypeCopy[id].illustrationUrl),
     },
   ]),
 ) as Record<GymtiType, GymtiTypePresentation>

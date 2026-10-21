@@ -12,21 +12,16 @@ from fastapi import FastAPI
 from hakimi_analysis.access import AccessManager
 from hakimi_analysis.app import create_app
 from hakimi_analysis.bootstrap import (
-    UnconfiguredPipeline,
     build_adjustment_service,
     build_catalog,
     build_gymti_service,
+    build_http_client,
+    build_pipeline,
     build_playback_service,
+    build_reminder_planner,
 )
 from hakimi_analysis.dev import configure_local_environment
-from hakimi_analysis.media import LocalMediaProcessor
-from hakimi_analysis.orchestration import OrchestratedAnalysisPipeline, SkillRepository
-from hakimi_analysis.pipeline import AnalysisPipeline
-from hakimi_analysis.providers.ark import ArkResponsesClient
-from hakimi_analysis.providers.asr import VolcAsrClient
-from hakimi_analysis.reminders import TrainingReminderPlanner
 from hakimi_analysis.runtime_cleanup import RuntimeCleanupMonitor
-from hakimi_analysis.semantic_fusion import SemanticCandidateFusion
 from hakimi_analysis.settings import PROJECT_ROOT, Settings
 
 
@@ -60,25 +55,7 @@ def build_acceptance_app(
     web_root = settings.web_static_root or PROJECT_ROOT / "apps" / "web" / "dist"
     if not (web_root / "index.html").is_file() or not (web_root / "assets").is_dir():
         raise ValueError("acceptance requires a built frontend; run pnpm build first")
-    http_client = httpx.AsyncClient(
-        transport=provider_transport,
-        timeout=httpx.Timeout(settings.run_timeout_seconds, connect=15),
-        follow_redirects=False,
-    )
-    model = (
-        ArkResponsesClient(
-            api_key=settings.ark_api_key.get_secret_value(),
-            model_id=settings.ark_model_id,
-            visual_model_id=settings.ark_visual_model_id,
-            fusion_model_id=settings.ark_fusion_model_id,
-            analysis_response_format=settings.ark_analysis_response_format,
-            base_url=settings.ark_base_url,
-            http_client=http_client,
-            retry_delays=(),
-        )
-        if settings.ark_api_key is not None
-        else None
-    )
+    http_client = build_http_client(settings, transport=provider_transport)
     temp_root = temp_root or PROJECT_ROOT / "tmp" / "reminder-acceptance"
     runtime_cleanup = RuntimeCleanupMonitor(temp_root)
     access = AccessManager(
@@ -97,8 +74,12 @@ def build_acceptance_app(
         gymti_llm_enabled=settings.gymti_llm_enabled,
         gymti_llm_concurrency=settings.gymti_llm_concurrency,
         catalog=build_catalog(settings),
-        pipeline=_build_acceptance_pipeline(
-            settings, model, temp_root=temp_root, runtime_cleanup=runtime_cleanup
+        pipeline=build_pipeline(
+            settings,
+            http_client,
+            temp_root=temp_root,
+            runtime_cleanup=runtime_cleanup,
+            provider_retry_delays=(),
         ),
         access=access,
         app_env=settings.app_env,
@@ -112,50 +93,8 @@ def build_acceptance_app(
         web_static_root=web_root,
         cors_origins=[],
         release_sha=settings.app_release_sha,
-        reminder_planner=TrainingReminderPlanner(model),
+        reminder_planner=build_reminder_planner(settings, http_client),
         close_callbacks=[http_client.aclose],
-    )
-
-
-def _build_acceptance_pipeline(
-    settings: Settings,
-    model: ArkResponsesClient | None,
-    *,
-    temp_root: Path,
-    runtime_cleanup: RuntimeCleanupMonitor,
-) -> AnalysisPipeline:
-    if model is None or settings.volc_asr_api_key is None:
-        return UnconfiguredPipeline()
-    try:
-        skills = SkillRepository.load(PROJECT_ROOT / "skills")
-    except (OSError, ValueError):
-        return UnconfiguredPipeline()
-    # This explicit acceptance composition keeps the existing analysis contract,
-    # but never retries a paid experiment. No experimental evidence route is enabled.
-    return OrchestratedAnalysisPipeline(
-        media=LocalMediaProcessor(
-            temp_root=temp_root,
-            max_source_duration_seconds=settings.local_analysis_max_seconds,
-            runtime_cleanup=runtime_cleanup,
-        ),
-        asr=VolcAsrClient(
-            api_key=settings.volc_asr_api_key.get_secret_value(),
-            resource_id=settings.volc_asr_resource_id,
-            url=settings.volc_asr_url,
-            pace_audio=False,
-            retry_delays=(),
-        ),
-        ark=model,
-        skills=skills,
-        semantic_fusion=SemanticCandidateFusion(
-            model=model, instructions=skills.fusion_instructions, include_speech_context=True
-        ),
-        evidence_timeout_seconds=settings.analysis_evidence_timeout_seconds,
-        visual_chunk_timeout_seconds=settings.analysis_chunk_timeout_seconds,
-        visual_chunk_seconds=settings.analysis_visual_chunk_seconds,
-        visual_short_context_seconds=settings.analysis_visual_short_context_seconds,
-        visual_overlap_seconds=settings.analysis_visual_overlap_seconds,
-        run_timeout_seconds=settings.run_timeout_seconds,
     )
 
 

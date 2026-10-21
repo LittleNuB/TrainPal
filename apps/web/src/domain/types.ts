@@ -63,7 +63,7 @@ export interface AnalysisCapabilities {
 }
 
 export interface CoverageGap extends Segment {
-  reason: 'provider_error' | 'timeout' | 'media_error' | 'unknown'
+  reason: 'provider_error' | 'timeout' | 'media_error' | 'unknown' | 'ai_budget_exhausted' | 'ai_budget_unavailable'
   retryable: boolean
 }
 

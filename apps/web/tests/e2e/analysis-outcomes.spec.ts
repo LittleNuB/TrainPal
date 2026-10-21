@@ -100,6 +100,20 @@ test('AI system failure offers retry and contains no fallback candidate', async 
   await expect(page.locator('.saved-row')).toHaveCount(0)
 })
 
+test('AI budget exhaustion leads to manual editing without an immediate retry', async ({ page }) => {
+  await mockTerminalRun(page, 'failed')
+  await page.route('**/api/v1/analysis-runs/run-failed', route => route.fulfill({
+    json: { ...runView('run-failed', 'failed'), error: {
+      code: 'ai_budget_exhausted', message: 'AI 体验额度已用完，可以继续编辑方案和训练。', retryable: false,
+    } },
+  }))
+  await startAnalysis(page)
+  await expect(page.getByText('AI 体验额度已用完，可以继续编辑方案和训练。', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '重试分析', exact: true })).toHaveCount(0)
+  await page.getByRole('link', { name: '查看或编辑方案', exact: true }).click()
+  await expect(page).toHaveURL(/\/plan$/)
+})
+
 test('AI capacity exhaustion shows Retry-After and the labelled quick path', async ({ page }) => {
   await page.route('**/api/v1/analysis-runs', async (route) => {
     if (route.request().method() !== 'POST') return route.continue()

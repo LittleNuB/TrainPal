@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
+from hakimi_analysis.ai_budget import AiBudgetError
 from hakimi_analysis.evidence_time import offset_tip
 from hakimi_analysis.fusion import CandidateFusionSkill, normalize_action_name
 from hakimi_analysis.media import (
@@ -317,6 +318,9 @@ class OrchestratedAnalysisPipeline:
                 retryable=False,
             ) from error
 
+        budget_errors = ([speech_result] if isinstance(speech_result, AiBudgetError) else []) + [
+            error for _, error in visual_results.failures if isinstance(error, AiBudgetError)
+        ]
         speech_signals = speech_result if isinstance(speech_result, list) else []
         visual_segments = (
             visual_results.segments
@@ -398,7 +402,15 @@ class OrchestratedAnalysisPipeline:
             visual_results.successful_windows,
             visual_results.failures,
         )
-        warnings: list[AnalysisWarning] = []
+        warnings: list[AnalysisWarning] = [
+            AnalysisWarning(
+                code="ai_budget_exhausted"
+                if error.code == "ai_budget_exhausted"
+                else "ai_budget_unavailable",
+                message=str(error),
+            )
+            for error in budget_errors[:1]
+        ]
         if point_caption_uncertainty:
             warnings.append(
                 AnalysisWarning(
@@ -449,15 +461,18 @@ class OrchestratedAnalysisPipeline:
                 {"skill_version": self._fusion.version},
             )
             if self._semantic_fusion is not None:
-                fused = await self._semantic_fusion.run(
-                    source_id=source.id,
-                    speech_signals=speech_signals,
-                    visual_segments=visual_segments,
-                    remaining_seconds=evidence_deadline - self._clock(),
-                    speech_context=speech_context,
-                    visual_context=visual_context,
-                    visual_input_binding=visual_input_binding,
-                )
+                try:
+                    fused = await self._semantic_fusion.run(
+                        source_id=source.id,
+                        speech_signals=speech_signals,
+                        visual_segments=visual_segments,
+                        remaining_seconds=evidence_deadline - self._clock(),
+                        speech_context=speech_context,
+                        visual_context=visual_context,
+                        visual_input_binding=visual_input_binding,
+                    )
+                except AiBudgetError as error:
+                    raise PipelineFailure(error.code, str(error), retryable=False) from None
                 if any(code.startswith("unavailable_") for code in fused.diagnostics):
                     # Raw observations are not actions. A failed grouping must never
                     # publish a completed plan containing duplicate evidence rows.
@@ -474,6 +489,8 @@ class OrchestratedAnalysisPipeline:
                 )
         # Non-training observations may all disappear during semantic filtering.
         # Decide empty/failure coverage from usable candidates, not raw observations.
+        if not candidates and budget_errors:
+            raise PipelineFailure(budget_errors[0].code, str(budget_errors[0]), retryable=False)
         if isinstance(speech_result, ProviderError) and not candidates and not coverage_gaps:
             coverage_gaps = [
                 CoverageGap(
@@ -699,6 +716,8 @@ class OrchestratedAnalysisPipeline:
                     stage="analyzing_evidence",
                     error_code=failures[-1][1].code,
                 )
+            if failures and isinstance(failures[-1][1], AiBudgetError):
+                break
             if self._evidence_first_ark is not None and failures:
                 # The pilot requires complete readings; do not buy more unusable evidence.
                 break
@@ -810,7 +829,10 @@ def _coverage_gaps(
                 for window, failed_error in failures
                 if window.start_seconds <= midpoint < window.end_seconds
             ),
-            ProviderError("provider_error", "visual coverage unavailable", retryable=True),
+            next(
+                (error for _, error in failures if isinstance(error, AiBudgetError)),
+                ProviderError("provider_error", "visual coverage unavailable", retryable=True),
+            ),
         )
         reason = _coverage_gap_reason(error)
         if gaps and gaps[-1].end_seconds == start_seconds and gaps[-1].reason == reason:
@@ -821,7 +843,7 @@ def _coverage_gaps(
                     start_seconds=start_seconds,
                     end_seconds=end_seconds,
                     reason=reason,
-                    retryable=True,
+                    retryable=not isinstance(error, AiBudgetError),
                 )
             )
     return gaps
@@ -845,6 +867,8 @@ def _offset_visual_segments(
 
 
 def _coverage_gap_reason(error: ProviderError) -> CoverageGapReason:
+    if isinstance(error, AiBudgetError):
+        return CoverageGapReason(error.code)
     if error.code == "timeout":
         return CoverageGapReason.TIMEOUT
     if error.code == "media_error":

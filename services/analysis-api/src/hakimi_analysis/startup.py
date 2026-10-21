@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 
 from hakimi_analysis.media import probe_duration_sync
+from hakimi_analysis.portfolio_runtime import portfolio_runtime_guard
+from hakimi_analysis.settings import PROJECT_ROOT
 from hakimi_analysis.sources import (
     COMPETITION_CONTROLLED_SOURCE_COUNT,
     SourceCatalog,
@@ -36,7 +38,7 @@ def _valid_cached_source_count(manifest_path: Path, target_root: Path) -> int | 
     return catalog.source_count
 
 
-def main(argv: list[str] | None = None) -> int:
+def _start(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Synchronize controlled sources before starting the application server."
     )
@@ -87,6 +89,20 @@ def main(argv: list[str] | None = None) -> int:
         os.execvp(command[0], command)
     except OSError:
         print("controlled_source_startup_failed code=exec_failed", file=sys.stderr)
+        return 4
+
+
+def main(argv: list[str] | None = None) -> int:
+    if os.environ.get("DEPLOYMENT_PROFILE") != "portfolio":
+        return _start(argv)
+    try:
+        with portfolio_runtime_guard(
+            PROJECT_ROOT / "tmp" / "analysis-runs",
+            _required_environment_path("AI_BUDGET_DB_PATH"),
+        ):
+            return _start(argv)
+    except (OSError, ValueError, SourceManifestError):
+        print("portfolio_startup_failed code=runtime_recovery_failed", file=sys.stderr)
         return 4
 
 

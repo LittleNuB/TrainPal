@@ -7,6 +7,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from hakimi_analysis.ai_budget import AiBudgetError
 from hakimi_analysis.media import AnalysisWindow, PreparedMedia, PreparedVisualChunk
 from hakimi_analysis.models import (
     CoverageStatus,
@@ -1204,3 +1205,80 @@ async def test_run_budget_bounds_speech_and_preserves_completed_visual_evidence(
     assert output.coverage_status == CoverageStatus.COMPLETE
     assert output.candidates
     assert {warning.code for warning in output.warnings} == {"speech_unavailable"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["branches", "fusion", "speech_empty_visual"])
+async def test_paid_budget_denial_stays_nonretryable_and_cleans_media(
+    tmp_path: Path, stage: str
+) -> None:
+    class BudgetArk(FakeArk):
+        async def understand_speech(self, **kwargs: object) -> SpeechUnderstandingResult:
+            raise AiBudgetError()
+
+        async def locate_visual(self, **kwargs: object) -> VisualLocalizationResult:
+            if stage == "speech_empty_visual":
+                return VisualLocalizationResult(segments=[])
+            raise AiBudgetError()
+
+    def deny(request: httpx.Request) -> httpx.Response:
+        raise AiBudgetError()
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(deny)) as client:
+        media = FakeMediaProcessor(tmp_path)
+        fusion = (
+            SemanticCandidateFusion(
+                model=ArkResponsesClient(
+                    api_key="fixture",
+                    model_id="fixture",
+                    base_url="https://fixture.invalid",
+                    http_client=client,
+                ),
+                instructions="fixture",
+            )
+            if stage == "fusion"
+            else None
+        )
+        pipeline = OrchestratedAnalysisPipeline(
+            media=media,
+            asr=FakeAsr(),
+            ark=FakeArk() if stage == "fusion" else BudgetArk(),
+            skills=skills(),
+            semantic_fusion=fusion,
+        )
+        with pytest.raises(PipelineFailure) as error:
+            await pipeline.analyze(source(tmp_path), None, no_op_emit)
+        assert error.value.code == "ai_budget_exhausted"
+        assert error.value.retryable is False
+        assert media.exited.is_set()
+
+
+@pytest.mark.asyncio
+async def test_budget_gap_preserves_reliable_partial_actions_without_retry(tmp_path: Path) -> None:
+    class PartialBudgetArk(FakeArk):
+        calls = 0
+
+        async def locate_visual(self, **kwargs: object) -> VisualLocalizationResult:
+            self.calls += 1
+            if self.calls > 1:
+                raise AiBudgetError()
+            return await super().locate_visual(**kwargs)
+
+    ark = PartialBudgetArk()
+    pipeline = OrchestratedAnalysisPipeline(
+        media=FakeMediaProcessor(tmp_path), asr=FakeAsr(), ark=ark, skills=skills()
+    )
+    output = await pipeline.analyze(
+        VideoSource(
+            id="fixture", title="fixture", path=tmp_path / "fixture.mp4", duration_seconds=120
+        ),
+        None,
+        no_op_emit,
+    )
+    assert output.candidates
+    assert output.coverage_status == "partial"
+    assert all(
+        gap.reason == "ai_budget_exhausted" and not gap.retryable for gap in output.coverage_gaps
+    )
+    assert any(warning.code == "ai_budget_exhausted" for warning in output.warnings)
+    assert ark.calls == 2

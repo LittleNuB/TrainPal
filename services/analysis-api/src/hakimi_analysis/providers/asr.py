@@ -10,6 +10,7 @@ from uuid import uuid4
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
+from hakimi_analysis.ai_budget import AiBudgetError, AiBudgetLedger
 from hakimi_analysis.models import Transcript, TranscriptUtterance, TranscriptWord
 from hakimi_analysis.providers.base import ProviderError
 
@@ -36,6 +37,7 @@ class VolcAsrClient:
         chunk_duration_ms: int = 4000,
         pace_audio: bool = True,
         retry_delays: tuple[float, ...] = (1.0, 2.0),
+        budget: AiBudgetLedger | None = None,
     ) -> None:
         if chunk_duration_ms <= 0:
             raise ValueError("chunk_duration_ms must be positive")
@@ -45,6 +47,7 @@ class VolcAsrClient:
         self._chunk_duration_ms = chunk_duration_ms
         self._pace_audio = pace_audio
         self._retry_delays = retry_delays
+        self._budget = budget
 
     async def recognize(
         self,
@@ -58,17 +61,32 @@ class VolcAsrClient:
             audio_path,
             self._chunk_duration_ms,
         )
+        if self._budget and (
+            self._resource_id != "volc.seedasr.sauc.duration"
+            or self._url != "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream"
+        ):
+            raise AiBudgetError("ai_budget_unavailable")
         if not chunks:
             return Transcript(text="", utterances=[], provider_request_id=None)
 
         attempts = len(self._retry_delays) + 1
         for attempt in range(attempts):
+            # 16kHz mono PCM16; official on-demand ASR price is 4.5 yuan/hour.
+            charge = ((sum(len(chunk) for chunk in chunks) + 31_999) // 32_000) * 1_250
+            reservation = (
+                self._budget.reserve(charge, kind="asr", model=self._resource_id)
+                if self._budget
+                else None
+            )
             try:
-                return await self._recognize_once(
+                result = await self._recognize_once(
                     chunks=chunks,
                     window_start_seconds=window_start_seconds,
                     connect_id=request_id if attempt == 0 else str(uuid4()),
                 )
+                if self._budget and reservation:
+                    self._budget.settle(reservation, charge)
+                return result
             except ProviderError as error:
                 if not error.retryable or attempt == attempts - 1:
                     raise

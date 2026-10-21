@@ -1,0 +1,67 @@
+name: Portfolio image (verified main artifact)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  image:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      AUDIT_IMAGE: trainpal-portfolio:${{ github.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build outside the production server
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          push: false
+          tags: ${{ env.AUDIT_IMAGE }}
+          build-args: |
+            TRAINPAL_BASE_PATH=/trainpal/
+            VITE_UPLOAD_MAX_BYTES=67108864
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Audit layers, FFmpeg, dependency lock and preserved competition checks
+        run: bash deploy/verify-competition-image.sh "$AUDIT_IMAGE"
+      - name: Verify portfolio build and persistent budget runtime
+        run: |
+          docker run --rm --network none --read-only --tmpfs /tmp:size=32m \
+            --entrypoint services/analysis-api/.venv/bin/python "$AUDIT_IMAGE" -c '
+          from pathlib import Path
+          from hakimi_analysis.ai_budget import AiBudgetLedger
+          from hakimi_analysis.readiness import validate_ffmpeg_build_receipt
+          assert "/trainpal/assets/" in Path("apps/web/dist/index.html").read_text()
+          assert validate_ffmpeg_build_receipt(Path("/opt/trainpal/ffmpeg/bin/ffmpeg"), Path("/opt/trainpal/ffmpeg/receipt.json"))
+          db = Path("/tmp/ai.sqlite")
+          ledger = AiBudgetLedger(db)
+          ledger.reserve(123, kind="fixture", model="fixture")
+          assert AiBudgetLedger(db).snapshot()["used_micro_yuan"] == 123
+          print("portfolio_image_checks_pass")
+          '
+      - name: Publish audited artifact bound to main SHA
+        run: |
+          set -Eeuo pipefail
+          docker save "$AUDIT_IMAGE" | gzip -1 > trainpal-image.tar.gz
+          sha256sum trainpal-image.tar.gz > SHA256SUMS
+          printf '%s\n' "$GITHUB_SHA" > RELEASE_SHA
+          gh release create "portfolio-build-${GITHUB_SHA}" \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "TrainPal portfolio build ${GITHUB_SHA:0:12}" \
+            --notes "Audited deployment artifact. Device and public acceptance are recorded separately." \
+            trainpal-image.tar.gz SHA256SUMS RELEASE_SHA

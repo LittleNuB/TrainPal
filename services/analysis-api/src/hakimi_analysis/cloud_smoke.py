@@ -17,7 +17,7 @@ from pydantic import (
     model_validator,
 )
 
-from hakimi_analysis.bootstrap import build_catalog, build_pipeline
+from hakimi_analysis.bootstrap import build_catalog, build_http_client, build_pipeline
 from hakimi_analysis.models import AnalysisCandidate, EvidenceType, RunStage
 from hakimi_analysis.pipeline import AnalysisPipeline, PipelineFailure, PipelineOutput
 from hakimi_analysis.providers.base import ProviderError
@@ -464,12 +464,8 @@ async def _run_source(
     result = None
     caught: SmokeFailure | None = None
     try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(settings.run_timeout_seconds, connect=15),
-            follow_redirects=False,
-            event_hooks={"response": [audit.observe]},
-            transport=transport,
-        ) as http_client:
+        async with build_http_client(settings, transport=transport) as http_client:
+            http_client.event_hooks["response"].append(audit.observe)
             pipeline = pipeline_builder(settings, http_client, temp_root=temp_root)
             try:
                 async with asyncio.timeout(settings.run_timeout_seconds):

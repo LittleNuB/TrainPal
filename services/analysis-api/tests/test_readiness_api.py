@@ -10,7 +10,7 @@ import pytest
 
 from hakimi_analysis.access import AccessManager
 from hakimi_analysis.app import create_app
-from hakimi_analysis.readiness import ProductionReadiness
+from hakimi_analysis.readiness import PortfolioReadiness, ProductionReadiness
 from hakimi_analysis.settings import Settings
 from hakimi_analysis.sources import EmptySourceCatalog, SourceCatalog, VideoSource
 
@@ -150,6 +150,7 @@ async def test_access_session_does_not_claim_analysis_is_available_while_not_rea
 def configured_readiness(
     tmp_path: Path,
     *,
+    readiness_type: type[ProductionReadiness] = ProductionReadiness,
     controlled_sources: bool = True,
     controlled_source_count: int = 5,
     include_web_root: bool = True,
@@ -255,7 +256,7 @@ def configured_readiness(
         else EmptySourceCatalog()
     )
     return (
-        ProductionReadiness(
+        readiness_type(
             settings=settings,
             catalog=catalog,
             temp_root=tmp_path / "analysis-runs",
@@ -569,3 +570,33 @@ def test_production_ready_rejects_a_symbolic_link_added_to_the_media_cache(
             pytest.skip("directory links are unavailable for this test user")
 
     assert readiness.check() == "media_cache_invalid"
+
+
+@pytest.mark.parametrize(
+    "incorrect", [{}, {"ark_model_id": "doubao-seed-2-1-pro-260628"}, {"ai_budget_db_path": None}]
+)
+def test_portfolio_readiness_has_separate_strict_policy(
+    tmp_path: Path, incorrect: dict[str, Any]
+) -> None:
+    overrides = {
+        "deployment_profile": "portfolio",
+        "ark_model_id": "doubao-seed-2-1-pro-260915",
+        "ark_visual_model_id": "doubao-seed-2-1-pro-260628",
+        "ark_analysis_response_format": "json_object",
+        "training_reminders_enabled": True,
+        "ai_budget_db_path": tmp_path / "budget" / "ai.sqlite",
+        "public_base_path": "/trainpal",
+        "local_upload_max_bytes": 64 * 1024 * 1024,
+        "run_timeout_seconds": 600,
+        "analysis_evidence_timeout_seconds": 590,
+        "analysis_chunk_timeout_seconds": 90,
+        "analysis_visual_short_context_seconds": 90,
+    }
+    overrides.update(incorrect)
+    readiness, _ = configured_readiness(
+        tmp_path,
+        readiness_type=PortfolioReadiness,
+        trusted_proxy_cidrs="127.0.0.1/32",
+        settings_overrides=overrides,
+    )
+    assert readiness.check() == ("portfolio_configuration_invalid" if incorrect else None)

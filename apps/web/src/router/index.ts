@@ -146,7 +146,7 @@ export const createTrainPalRoutes = (includeDesignGallery: boolean): RouteRecord
 }
 
 export const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes: createTrainPalRoutes(import.meta.env.DEV),
   scrollBehavior: () => ({ top: 0 }),
 })

@@ -371,6 +371,7 @@ def test_acceptance_launch_configuration_is_separate_and_preserves_explicit_budg
     assert environment == {
         "APP_ENV": "development",
         "ANALYSIS_PROVIDER": "cloud",
+        "TRAINING_REMINDERS_ENABLED": "true",
         "ANALYSIS_CHUNK_TIMEOUT_SECONDS": "90",
         "ANALYSIS_EVIDENCE_TIMEOUT_SECONDS": "590",
         "ANALYSIS_VISUAL_SHORT_CONTEXT_SECONDS": "90",

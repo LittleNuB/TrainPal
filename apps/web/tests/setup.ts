@@ -1,5 +1,5 @@
 import { afterEach } from 'vitest'
 
 afterEach(() => {
-  document.body.innerHTML = ''
+  if (typeof document !== 'undefined') document.body.innerHTML = ''
 })

@@ -12,6 +12,8 @@ RUN pnpm install --frozen-lockfile --filter @hachimi/web...
 COPY apps/web apps/web
 COPY contracts/gymti-questionnaire.v1.json contracts/gymti-questionnaire.v1.json
 ARG VITE_UPLOAD_MAX_BYTES=19000000
+ARG TRAINPAL_BASE_PATH=/
+ENV TRAINPAL_BASE_PATH=${TRAINPAL_BASE_PATH}
 ENV VITE_UPLOAD_MAX_BYTES=${VITE_UPLOAD_MAX_BYTES}
 RUN pnpm --filter @hachimi/web build
 

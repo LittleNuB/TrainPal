@@ -10,6 +10,7 @@ from typing import Final, Literal, Protocol
 
 from pydantic import Field, model_validator
 
+from hakimi_analysis.ai_budget import AiBudgetError
 from hakimi_analysis.models import Segment, SourceTip, StrictModel
 from hakimi_analysis.source_tips import compact_text, safe_tips
 
@@ -245,6 +246,8 @@ class TrainingReminderPlanner:
                         )
                 except TimeoutError:
                     fallback_reason = "model_timeout"
+                except AiBudgetError:
+                    raise
                 except Exception:
                     # Only the replaceable external ranking boundary is guarded here.
                     # Cancellation is a BaseException and must propagate.

@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     app_env: Literal["development", "test", "production"] = "development"
     app_release_sha: str | None = None
     analysis_provider: Literal["cloud", "test"] = "cloud"
+    ai_budget_db_path: Path | None = None
+    deployment_profile: Literal["competition", "portfolio"] = "competition"
+    public_base_path: str = ""
+    training_reminders_enabled: bool = False
     ark_api_key: SecretStr | None = None
     ark_model_id: str = "doubao-seed-2-0-mini-260428"
     ark_visual_model_id: str = "doubao-seed-2-0-mini-260428"
@@ -103,6 +107,13 @@ class Settings(BaseSettings):
                 network = ip_network(entry, strict=False)
                 if network.prefixlen == 0:
                     raise ValueError("trusted proxy CIDR must not trust every address")
+        return value
+
+    @field_validator("public_base_path")
+    @classmethod
+    def validate_public_base_path(cls, value: str) -> str:
+        if value and not re.fullmatch(r"(?:/[a-zA-Z0-9_-]+)+", value):
+            raise ValueError("public base path must be empty or a safe absolute path")
         return value
 
     @field_validator(

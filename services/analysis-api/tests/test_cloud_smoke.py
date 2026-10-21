@@ -8,9 +8,11 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
+from hakimi_analysis.ai_budget import AiBudgetLedger
 from hakimi_analysis.cloud_smoke import (
     SmokeFailure,
     SmokeManifestError,
+    _run_source,
     failure_payload,
     load_smoke_manifest,
     run_smoke,
@@ -608,3 +610,48 @@ async def test_cloud_smoke_requires_annotations_for_every_controlled_source(
         "controlled_source_count": 2,
         "annotated_source_count": 1,
     }
+
+
+@pytest.mark.asyncio
+async def test_cloud_smoke_does_not_bypass_exhausted_model_budget(tmp_path: Path) -> None:
+    path = tmp_path / "budget.sqlite"
+    ledger = AiBudgetLedger(path)
+    ledger.reserve(5_000_000, kind="fixture", model="fixture")
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={})
+
+    class PaidPipeline:
+        def __init__(self, client: httpx.AsyncClient) -> None:
+            self.client = client
+
+        async def analyze(
+            self, source: VideoSource, trigger_seconds: float | None, emit: EmitCallback
+        ) -> PipelineOutput:
+            await self.client.post(
+                "https://ark.cn-beijing.volces.com/api/v3/responses",
+                json={"model": "doubao-seed-2-1-pro-260915", "input": "fixture"},
+            )
+            return PipelineOutput()
+
+    def builder(
+        settings: Settings, http_client: httpx.AsyncClient, *, temp_root: Path | None = None
+    ) -> PaidPipeline:
+        return PaidPipeline(http_client)
+
+    with pytest.raises(SmokeFailure) as error:
+        await _run_source(
+            settings=Settings(_env_file=None, ai_budget_db_path=path),
+            source=VideoSource(
+                id="fixture", title="fixture", path=tmp_path / "fixture.mp4", duration_seconds=60
+            ),
+            checkpoints=[],
+            pipeline_builder=builder,
+            transport=httpx.MockTransport(handler),
+            temp_root=tmp_path / "runs",
+        )
+    assert error.value.code == "ai_budget_exhausted"
+    assert requests == []
+    assert ledger.snapshot()["used_micro_yuan"] == 5_000_000

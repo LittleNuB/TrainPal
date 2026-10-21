@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import sqlite3
 import subprocess
 from collections.abc import Callable
 from contextlib import suppress
@@ -11,6 +12,7 @@ from typing import Protocol
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from hakimi_analysis.ai_budget import AiBudgetLedger
 from hakimi_analysis.gymti import GymtiContractError, load_gymti_contract
 from hakimi_analysis.media import probe_duration_sync
 from hakimi_analysis.orchestration import SkillRepository
@@ -22,9 +24,7 @@ FFMPEG_CONFIGURATION_PREFIX = "configuration:"
 FORBIDDEN_FFMPEG_CONFIGURATION_FLAGS = frozenset({"--enable-gpl", "--enable-nonfree"})
 FFMPEG_RELEASE_VERSION = "8.1.2"
 FFMPEG_RELEASE_FINGERPRINT = "FCF986EA15E6E293A5644F10B4322F04D67658D8"
-FFMPEG_RELEASE_SOURCE_URL = (
-    f"https://ffmpeg.org/releases/ffmpeg-{FFMPEG_RELEASE_VERSION}.tar.xz"
-)
+FFMPEG_RELEASE_SOURCE_URL = f"https://ffmpeg.org/releases/ffmpeg-{FFMPEG_RELEASE_VERSION}.tar.xz"
 FFMPEG_RECEIPT_KEYS = {
     "schema_version",
     "version",
@@ -180,8 +180,7 @@ class ProductionReadiness:
             or not self._settings.volc_asr_url.strip()
             or not self._settings.gymti_llm_enabled
             or not self._settings.gymti_llm_retention_confirmed
-            or self._settings.gymti_llm_model.strip()
-            != GYMTI_DOUBAO_SEED_MINI_MODEL
+            or self._settings.gymti_llm_model.strip() != GYMTI_DOUBAO_SEED_MINI_MODEL
             or not self._settings.gymti_llm_base_url.strip()
         ):
             return "provider_configuration_invalid"
@@ -254,9 +253,10 @@ class ProductionReadiness:
             return "web_static_unavailable"
         if not self._temp_storage_available():
             return "temp_storage_unavailable"
-        if not self._competition_profile_valid():
-            return "competition_configuration_invalid"
-        return None
+        return self._deployment_configuration_failure()
+
+    def _deployment_configuration_failure(self) -> str | None:
+        return None if self._competition_profile_valid() else "competition_configuration_invalid"
 
     def _competition_profile_valid(self) -> bool:
         return (
@@ -296,3 +296,46 @@ class StaticReadiness:
 
     def check(self) -> str | None:
         return self._failure_code
+
+
+class PortfolioReadiness(ProductionReadiness):
+    """Separate personal-site deployment; competition checks remain unchanged."""
+
+    def _deployment_configuration_failure(self) -> str | None:
+        settings = self._settings
+        if (
+            settings.app_env != "production"
+            or settings.analysis_provider != "cloud"
+            or settings.ark_model_id != "doubao-seed-2-1-pro-260915"
+            or settings.ark_visual_model_id != "doubao-seed-2-1-pro-260628"
+            or settings.ark_fusion_model_id not in (None, "doubao-seed-2-1-pro-260915")
+            or settings.ark_analysis_response_format != "json_object"
+            or settings.ark_base_url.rstrip("/") != "https://ark.cn-beijing.volces.com/api/v3"
+            or settings.volc_asr_resource_id != "volc.seedasr.sauc.duration"
+            or settings.volc_asr_url
+            != "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream"
+            or not settings.training_reminders_enabled
+            or settings.ai_budget_db_path is None
+            or settings.public_base_path != "/trainpal"
+            or settings.local_upload_max_bytes != 64 * 1024 * 1024
+            or settings.local_analysis_max_seconds != 300
+            or settings.public_analysis_concurrency != 1
+            or settings.judge_analysis_concurrency != 0
+            or settings.run_timeout_seconds != 600
+            or settings.analysis_evidence_timeout_seconds != 590
+            or settings.analysis_chunk_timeout_seconds != 90
+            or settings.analysis_visual_short_context_seconds != 90
+            or settings.trusted_proxy_cidr_list != ["127.0.0.1/32"]
+        ):
+            return "portfolio_configuration_invalid"
+        budget_path = settings.ai_budget_db_path.resolve()
+        if budget_path.is_relative_to(self._temp_root.resolve()) or (
+            settings.web_static_root is not None
+            and budget_path.is_relative_to(settings.web_static_root.resolve())
+        ):
+            return "portfolio_configuration_invalid"
+        try:
+            AiBudgetLedger(settings.ai_budget_db_path).snapshot()
+        except (OSError, ValueError, sqlite3.Error):
+            return "ai_budget_unavailable"
+        return None

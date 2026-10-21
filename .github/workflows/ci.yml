@@ -38,3 +38,4 @@ jobs:
 
       - run: pnpm --filter @hachimi/web exec playwright install --with-deps chromium
       - run: pnpm test:e2e
+      - run: pnpm --filter @hachimi/web exec playwright test --config playwright.portfolio.config.ts

@@ -39,6 +39,7 @@ from hakimi_analysis.access import (
     AdmissionDenied,
     AnalysisLease,
 )
+from hakimi_analysis.ai_budget import AiBudgetError
 from hakimi_analysis.gymti import GymtiContextError, GymtiService
 from hakimi_analysis.media import probe_duration_sync
 from hakimi_analysis.models import (
@@ -316,6 +317,7 @@ def create_app(
     playback_service: PlaybackService | None = None,
     reminder_planner: TrainingReminderPlanner | None = None,
     adjustment_service: PlanAdjustmentService | None = None,
+    public_base_path: str = "",
 ) -> FastAPI:
     if (
         not math.isfinite(local_analysis_max_seconds)
@@ -327,6 +329,8 @@ def create_app(
         raise ValueError("local upload byte limit must be positive")
     if release_sha is not None and re.fullmatch(r"[0-9a-f]{40}", release_sha) is None:
         raise ValueError("release SHA must be a full lowercase Git commit SHA")
+    if public_base_path and re.fullmatch(r"(?:/[a-zA-Z0-9_-]+)+", public_base_path) is None:
+        raise ValueError("invalid public base path")
     duration_probe = local_duration_probe or probe_duration_sync
     source_catalog = catalog or EmptySourceCatalog()
     resolved_pipeline: AnalysisPipeline
@@ -427,6 +431,8 @@ def create_app(
             raise HTTPException(status_code=429, detail="TrainPal 正忙，请稍后重试")
         try:
             proposal = await _until_disconnect(request, plan_adjustments.propose(payload))
+        except AiBudgetError:
+            raise
         except (ProviderError, ValueError, TimeoutError) as error:
             raise HTTPException(
                 status_code=503, detail="这次未能生成合适的调整，请重试或直接编辑数字"
@@ -506,6 +512,8 @@ def create_app(
             raise HTTPException(
                 status_code=422, detail="没有找到可靠片段，原片段保持不变"
             ) from error
+        except AiBudgetError:
+            raise
         except (TimeoutError, ProviderError) as error:
             raise HTTPException(status_code=503, detail="片段查找未完成，训练保持暂停") from error
         finally:
@@ -535,6 +543,8 @@ def create_app(
             command = await _until_disconnect(request, playback_service.transcribe(body))
         except (ValueError, ValidationError) as error:
             raise HTTPException(status_code=422, detail="没有听清，请改用文字") from error
+        except AiBudgetError:
+            raise
         except (TimeoutError, ProviderError) as error:
             raise HTTPException(status_code=503, detail="语音暂不可用，请改用文字") from error
         finally:
@@ -596,6 +606,14 @@ def create_app(
                 "residue_count": snapshot.residue_count,
                 "ffmpeg_process_count": snapshot.ffmpeg_process_count,
             },
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.exception_handler(AiBudgetError)
+    async def budget_error_handler(request: Request, error: AiBudgetError) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": str(error), "code": error.code},
             headers={"Cache-Control": "no-store"},
         )
 
@@ -665,7 +683,7 @@ def create_app(
         finally:
             if model_admitted:
                 gymti_model_gate.release()
-        _set_access_cookie(response, access_manager, session)
+        _set_access_cookie(response, access_manager, session, path=public_base_path or "/")
         response.headers["Cache-Control"] = "no-store"
         return GymtiNextQuestionView(
             question_id=selected.question_id,
@@ -727,7 +745,7 @@ def create_app(
         finally:
             if model_admitted:
                 gymti_model_gate.release()
-        _set_access_cookie(response, access_manager, session)
+        _set_access_cookie(response, access_manager, session, path=public_base_path or "/")
         response.headers["Cache-Control"] = "no-store"
         return GymtiNarrativeSnapshotView(
             source=snapshot.source,
@@ -759,7 +777,7 @@ def create_app(
     @app.get("/api/v1/access/session", response_model=AccessSessionView)
     async def get_access_session(request: Request, response: Response) -> AccessSessionView:
         session = access_manager.resolve(request.cookies.get(ACCESS_COOKIE_NAME))
-        _set_access_cookie(response, access_manager, session)
+        _set_access_cookie(response, access_manager, session, path=public_base_path or "/")
         response.headers["Cache-Control"] = "no-store"
         return await access_view(
             session,
@@ -799,7 +817,7 @@ def create_app(
                 detail="体验码无效",
                 headers={"Cache-Control": "no-store"},
             )
-        _set_access_cookie(response, access_manager, upgraded)
+        _set_access_cookie(response, access_manager, upgraded, path=public_base_path or "/")
         response.headers["Cache-Control"] = "no-store"
         return await access_view(
             upgraded,
@@ -821,7 +839,10 @@ def create_app(
 
     @app.get("/api/v1/sources", response_model=list[SourceSummary])
     async def list_sources() -> list[SourceSummary]:
-        return source_catalog.list()
+        return [
+            source.model_copy(update={"media_url": public_base_path + source.media_url})
+            for source in source_catalog.list()
+        ]
 
     @app.get("/api/v1/sources/{source_id}/media")
     async def source_media(source_id: str) -> Response:
@@ -923,7 +944,7 @@ def create_app(
             await lease.release()
             raise
         lease.commit(created.id)
-        _set_access_cookie(response, access_manager, session)
+        _set_access_cookie(response, access_manager, session, path=public_base_path or "/")
         return created
 
     local_upload_routes = app if local_upload_enabled else APIRouter()
@@ -1059,7 +1080,7 @@ def create_app(
             lease.commit(created.id)
             ownership_transferred = True
             request.scope["state"][_LOCAL_UPLOAD_LEASE_TRANSFERRED_STATE] = True
-            _set_access_cookie(response, access_manager, session)
+            _set_access_cookie(response, access_manager, session, path=public_base_path or "/")
             return created
         finally:
             await _run_cleanup_to_completion(cleanup_request_resources())
@@ -1242,6 +1263,8 @@ def _set_access_cookie(
     response: Response,
     access_manager: AccessManager,
     session: AccessSession,
+    *,
+    path: str = "/",
 ) -> None:
     response.set_cookie(
         key=ACCESS_COOKIE_NAME,
@@ -1250,7 +1273,7 @@ def _set_access_cookie(
         secure=True,
         httponly=True,
         samesite="lax",
-        path="/",
+        path=path,
     )
 
 

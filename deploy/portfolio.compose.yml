@@ -1,0 +1,43 @@
+name: trainpal-portfolio
+services:
+  app:
+    image: ${TRAINPAL_IMAGE:?Use the verified main SHA image}
+    network_mode: host
+    restart: unless-stopped
+    stop_grace_period: 240s
+    mem_limit: 1g
+    memswap_limit: 1g
+    pids_limit: 128
+    env_file:
+      - /etc/trainpal/production.env
+    environment:
+      APP_RELEASE_SHA: ${TRAINPAL_SHA:?Use the full verified main SHA}
+    command:
+      - services/analysis-api/.venv/bin/python
+      - -m
+      - hakimi_analysis.startup
+      - --
+      - services/analysis-api/.venv/bin/uvicorn
+      - hakimi_analysis.main:app
+      - --host
+      - 127.0.0.1
+      - --port
+      - '8788'
+      - --workers
+      - '1'
+      - --no-access-log
+      - --no-proxy-headers
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    volumes:
+      - /var/lib/trainpal/budget:/var/lib/trainpal/budget
+      - /var/lib/trainpal/runtime:/workspace/tmp/analysis-runs
+      - /var/lib/trainpal/media:/var/lib/trainpal/media:ro
+    healthcheck:
+      test: [CMD, services/analysis-api/.venv/bin/python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8788/api/v1/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

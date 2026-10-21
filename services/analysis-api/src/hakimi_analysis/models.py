@@ -59,6 +59,8 @@ class CoverageStatus(StrEnum):
 
 
 class CoverageGapReason(StrEnum):
+    AI_BUDGET_EXHAUSTED = "ai_budget_exhausted"
+    AI_BUDGET_UNAVAILABLE = "ai_budget_unavailable"
     PROVIDER_ERROR = "provider_error"
     TIMEOUT = "timeout"
     MEDIA_ERROR = "media_error"
@@ -87,6 +89,8 @@ class ErrorCode(StrEnum):
     SCHEMA_ERROR = "schema_error"
     MEDIA_ERROR = "media_error"
     TIMEOUT = "timeout"
+    AI_BUDGET_EXHAUSTED = "ai_budget_exhausted"
+    AI_BUDGET_UNAVAILABLE = "ai_budget_unavailable"
     CANCELLED = "cancelled"
 
 
@@ -115,7 +119,17 @@ class EvidenceSpan(Segment):
 
 class CoverageGap(Segment):
     reason: CoverageGapReason
-    retryable: Literal[True]
+    retryable: bool
+
+    @model_validator(mode="after")
+    def validate_budget_retry(self) -> "CoverageGap":
+        budget_reason = self.reason in {
+            CoverageGapReason.AI_BUDGET_EXHAUSTED,
+            CoverageGapReason.AI_BUDGET_UNAVAILABLE,
+        }
+        if self.retryable == budget_reason:
+            raise ValueError("budget gaps cannot retry; other coverage gaps must allow retry")
+        return self
 
 
 class CandidateParameters(StrictModel):
@@ -331,8 +345,14 @@ class GymtiNarrativeSnapshotView(StrictModel):
 
 
 class AnalysisWarning(StrictModel):
-    code: Literal["speech_unavailable", "visual_unavailable", "semantic_fusion_unavailable",
-                  "semantic_fusion_conflict"]
+    code: Literal[
+        "ai_budget_exhausted",
+        "ai_budget_unavailable",
+        "speech_unavailable",
+        "visual_unavailable",
+        "semantic_fusion_unavailable",
+        "semantic_fusion_conflict",
+    ]
     message: str
 
 
