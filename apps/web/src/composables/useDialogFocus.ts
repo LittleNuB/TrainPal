@@ -11,7 +11,7 @@ const focusableSelector = [
 
 const focusableElements = (dialog: HTMLElement): HTMLElement[] =>
   [...dialog.querySelectorAll<HTMLElement>(focusableSelector)]
-    .filter((element) => element.getAttribute('aria-hidden') !== 'true')
+    .filter((element) => element.getAttribute('aria-hidden') !== 'true' && !element.closest('dialog:not([open])'))
 
 export const useDialogFocus = (dialog: Ref<HTMLElement | null>) => {
   let returnTarget: HTMLElement | null = null

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -37,7 +38,7 @@ for (const width of [320, 390, 768, 1440]) {
       coverage_status: 'complete', coverage_gaps: [], created_at: '2026-09-18T00:00:00Z', updated_at: '2026-09-18T00:00:01Z',
       candidates: [
         { id: 'first', source_id: 'e2e-source-01', name: '测试俯卧撑', segment: { start_seconds: 0, end_seconds: 1.9 },
-          parameters: { mode: 'reps', sets: 2, reps: 3, duration_seconds: null, rest_seconds: 1 },
+          parameters: { mode: 'reps', sets: 2, reps: 3, duration_seconds: null, rest_seconds: 4 },
           evidence: [{ type: 'speech', start_seconds: 0, end_seconds: 1.9 }], needs_confirmation: false,
           tips: [{ text: '推起时呼气', category: 'breathing', evidence: { type: 'speech', start_seconds: 0.3, end_seconds: 0.8 } }],
         },
@@ -88,11 +89,35 @@ for (const width of [320, 390, 768, 1440]) {
     await mkdir(output, { recursive: true })
     await page.screenshot({ path: path.join(output, `${width}-training.png`), fullPage: true })
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
-    await page.getByRole('button', { name: '完成本组', exact: true }).click()
+    await page.getByRole('button', { name: '语音唤醒 · 关', exact: true }).click()
+    await page.getByRole('button', { name: '开启语音唤醒', exact: true }).click()
+    await expect(page.getByText('喊「TrainPal」就能说')).toBeVisible()
+    await page.getByRole('button', { name: '关闭 TrainPal' }).click()
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('test:voice', { detail: 'TrainPal，继续训练' })))
+    await expect(page.getByRole('button', { name: '完成本组', exact: true })).toBeEnabled()
+    await page.evaluate(() => {
+      // A repeated recognition event from the same utterance must count only once.
+      window.dispatchEvent(new CustomEvent('test:voice', { detail: 'TrainPal，完成本组' }))
+      window.dispatchEvent(new CustomEvent('test:voice', { detail: 'TrainPal，完成本组' }))
+    })
     await expect(page.getByText('本次已完成 1 / 3 组', { exact: true })).toBeVisible()
-    await expect(page.getByRole('button', { name: '完成本组', exact: true })).toBeVisible({ timeout: 7_000 })
-    await page.getByRole('button', { name: '完成本组', exact: true }).click()
-    await expect(page.getByRole('button', { name: '准备好了', exact: true })).toBeVisible()
+    await expect(page.locator('.status-pill')).toHaveText('组间休息')
+    await expect(page.locator('dialog.voice-sheet')).toBeHidden()
+    await expect(page.getByRole('button', { name: '语音唤醒 · 开', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: '放大', exact: true }).click()
+    const completionView = page.getByRole('dialog', { name: '当前动作示范 · 放大观看', exact: true })
+    await expect.poll(() => completionView.locator('video').evaluate((video: HTMLVideoElement) => video.readyState >= 2 && video.duration > 0)).toBe(true)
+    await page.screenshot({ path: path.join(output, `${width}-voice-completed-rest.png`) })
+    await expect(completionView.getByRole('button', { name: '完成本组', exact: true })).toBeEnabled({ timeout: 10_000 })
+    // The two-utterance wake flow must work too: name first, command afterwards.
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('test:voice', { detail: 'TrainPal' })))
+    await expect(page.getByRole('heading', { name: '我在听', exact: true })).toBeVisible()
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('test:voice', { detail: '完成本组' })))
+    await expect(page.locator('dialog.voice-sheet')).toBeHidden()
+    await expect(completionView).toContainText('本次已完成 2 / 3 组')
+    await expect(completionView.getByRole('button', { name: '提前继续', exact: true })).toBeEnabled()
+    await completionView.getByRole('button', { name: '收起视频', exact: true }).click()
+    await expect(page.getByRole('button', { name: '准备好了', exact: true })).toBeVisible({ timeout: 7_000 })
     await expect(page.getByRole('heading', { name: '测试支撑', exact: true })).toBeVisible()
     await page.getByRole('button', { name: '准备好了', exact: true }).click()
     await expect(page.getByRole('heading', { name: '训练完成', exact: true })).toBeVisible({ timeout: 7_000 })
@@ -110,15 +135,77 @@ for (const width of [320, 390, 768, 1440]) {
     await page.getByRole('button', { name: '开启语音唤醒', exact: true }).click()
     await expect(page.getByText('喊「TrainPal」就能说')).toBeVisible()
     await page.getByRole('button', { name: '关闭 TrainPal' }).click()
+    const video = await page.locator('video').elementHandle()
+    await page.getByRole('button', { name: '放大', exact: true }).click()
+    const expandedVideo = page.getByRole('dialog', { name: '当前动作示范 · 放大观看', exact: true })
+    const voiceSheet = page.locator('dialog.voice-sheet')
+    await expect(expandedVideo.getByRole('button', { name: '语音唤醒 · 开', exact: true })).toBeVisible()
+    expect(await video!.evaluate(element => element === document.querySelector('.player-panel--expanded video'))).toBe(true)
+    // Enable inside expanded mode as well as carrying an existing opt-in into it.
+    await expandedVideo.getByRole('button', { name: '语音唤醒 · 开', exact: true }).click()
+    await expandedVideo.getByRole('button', { name: '语音唤醒 · 关', exact: true }).click()
+    await voiceSheet.getByRole('button', { name: '开启语音唤醒', exact: true }).click()
+    await expect(voiceSheet.getByText('喊「TrainPal」就能说')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(voiceSheet).toBeHidden()
+    await expect(expandedVideo).toBeVisible()
+    await expect(expandedVideo.getByRole('button', { name: '跟我说', exact: true })).toBeFocused()
+    // Closed nested dialogs must not break the expanded player's keyboard loop.
+    await expandedVideo.getByRole('button', { name: '语音唤醒 · 开', exact: true }).focus()
+    await page.keyboard.press('Tab')
+    await expect(expandedVideo.getByRole('button', { name: '收起视频', exact: true })).toBeFocused()
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('test:voice', { detail: 'TrainPal，继续训练' })))
+    await expect(expandedVideo.getByRole('button', { name: '完成本组', exact: true })).toBeEnabled()
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('test:voice', { detail: 'TrainPal，暂停训练' })))
+    await expect(voiceSheet.getByText('训练已暂停', { exact: true })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(voiceSheet).toBeHidden()
+    await expect(expandedVideo).toBeVisible()
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('test:voice', { detail: '重看呼吸讲解' })))
     await expect(page.getByRole('button', { name: '用这段并继续', exact: true })).not.toBeVisible()
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('test:voice', { detail: 'TrainPal，重看呼吸讲解' })))
     await expect(page.getByRole('button', { name: '用这段并继续', exact: true })).toBeVisible()
     await expect(page.getByText('也可以说“TrainPal，确认”')).toBeVisible()
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('test:voice', { detail: 'TrainPal，预览' })))
+    await expect(voiceSheet).toBeVisible()
+    expect(await video!.evaluate(element => element === document.querySelector('.player-panel--expanded video'))).toBe(true)
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
     await page.screenshot({ path: path.join(output, `${width}-voice-review.png`), fullPage: true })
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('test:voice', { detail: 'TrainPal，确认' })))
     await expect(page.getByText('已记住这个片段，下次复练也会使用。')).toBeVisible()
+    await expect(voiceSheet).toBeHidden()
+    await expect(expandedVideo.getByRole('button', { name: '完成本组', exact: true })).toBeEnabled()
+    await expect(expandedVideo.getByRole('button', { name: '暂停', exact: true })).toBeVisible()
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
+    await page.screenshot({ path: path.join(output, `${width}-expanded-voice.png`) })
+    if (width === 390) {
+      await page.setViewportSize({ width: 844, height: 390 })
+      for (const name of ['跟我说', '语音唤醒 · 开', '完成本组', '暂停']) {
+        await expect(expandedVideo.getByRole('button', { name, exact: true })).toBeInViewport()
+      }
+      await page.screenshot({ path: path.join(output, '844-expanded-voice.png') })
+      await page.setViewportSize({ width, height: 900 })
+    }
+    await expandedVideo.getByRole('button', { name: '收起视频', exact: true }).click()
+    await expect(page.getByRole('button', { name: '语音唤醒 · 开', exact: true })).toBeVisible()
+    expect(await video!.evaluate(element => element === document.querySelector('video'))).toBe(true)
+    if (width === 390) {
+      await page.getByRole('button', { name: '放大', exact: true }).click()
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent('test:voice', { detail: 'TrainPal，重看呼吸讲解' })))
+      await expect(voiceSheet.getByRole('button', { name: '用这段并继续', exact: true })).toBeVisible()
+      await video!.evaluate(element => element.dispatchEvent(new Event('error')))
+      await expect(expandedVideo).toBeHidden()
+      // A detached native dialog retains open but loses top-layer modality.
+      // The same result sheet must recover after moving back into the page.
+      await expect(voiceSheet.getByRole('button', { name: '用这段并继续', exact: true })).toBeVisible()
+      await expect.poll(() => voiceSheet.evaluate(element => element.matches(':modal'))).toBe(true)
+      await page.keyboard.press('Tab')
+      expect(await voiceSheet.evaluate(element => element.contains(document.activeElement))).toBe(true)
+      await page.keyboard.press('Escape')
+      await expect(voiceSheet).toBeHidden()
+      await expect(page.getByRole('button', { name: '跟我说', exact: true })).toBeFocused()
+    }
     await page.getByRole('button', { name: '语音唤醒 · 开', exact: true }).click()
     await expect(page.getByText('喊「TrainPal」就能说')).toHaveCount(0)
     expect(errors).toEqual([])

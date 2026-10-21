@@ -46,7 +46,7 @@ describe('local media file gate', () => {
     )).toEqual({
       ok: false,
       code: 'too_long',
-      message: '当前环境支持最长 1 分钟的视频；长视频能力尚未完成验证',
+      message: '视频过长，请截取 1 分钟以内的片段再选择',
     })
   })
 
@@ -67,7 +67,7 @@ describe('local media file gate', () => {
     expect(validateLocalMediaFile(fileOverLimit, 300, cloudCapabilities)).toEqual({
       ok: false,
       code: 'too_large',
-      message: 'CloudBase 演示入口限制 20 MB；请先压缩视频再上传',
+      message: '视频过大，请压缩至 19 MB 以内再选择',
     })
     expect(effectiveLocalUploadMaxBytes(capabilities)).toBe(10)
   })

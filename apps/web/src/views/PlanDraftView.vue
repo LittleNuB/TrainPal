@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import VideoPlayer from '@/features/experience/VideoPlayer.vue'
 import SourceTips from '@/features/experience/SourceTips.vue'
 import NumericStepper from '@/components/NumericStepper.vue'
 import { matchingFeedback } from '@/personalization/feedback'
@@ -1021,7 +1022,7 @@ const retryOperation = async (): Promise<void> => {
             {{ previewingItemId === selectedItem.id ? '重新读取来源视频' : '预览来源视频' }}
           </button>
           <div v-if="previewingItemId === selectedItem.id" class="local-preview">
-            <video v-if="previewUrl" :src="previewUrl" controls playsinline preload="metadata" />
+            <VideoPlayer v-if="previewUrl" :src="previewUrl" label="动作来源视频" />
             <p v-else role="status">{{ previewError || '正在读取本地视频…' }}</p>
             <label v-if="!previewUrl" class="reselect-local-media">
               重新选择原视频
@@ -1344,7 +1345,6 @@ const retryOperation = async (): Promise<void> => {
 .source-detail > a { display: grid; place-items: center; }
 .source-help { margin: 0; color: var(--tp-muted); font-size: 11px; line-height: 1.6; }
 .local-preview { display: grid; gap: 8px; }
-.local-preview video { width: 100%; max-height: 280px; border-radius: 12px; object-fit: contain; background: #000; }
 .local-preview p { margin: 0; color: var(--tp-muted); font-size: 11px; }
 .local-preview .local-storage-message { color: var(--tp-success); }
 .reselect-local-media { position: relative; display: grid; min-height: 44px; place-items: center; overflow: hidden; border: 1px solid var(--tp-line); border-radius: 999px; color: var(--tp-ink); font-size: 12px; font-weight: 800; }

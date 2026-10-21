@@ -26,6 +26,7 @@ for (const width of [320, 390, 768, 1440]) {
     const capture = async (stage: string) => {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
       await page.screenshot({ path: path.join(output, `${width}-${stage}.png`), fullPage: true })
+      if (stage === 'training') await page.screenshot({ path: path.join(output, `${width}-${stage}-viewport.png`) })
     }
     const result = {
       id: 'watch-fixture', source_id: 'e2e-source-01', trigger_seconds: null,
@@ -39,7 +40,7 @@ for (const width of [320, 390, 768, 1440]) {
           tips: [{ text: '推起时呼气', category: 'breathing', evidence: { type: 'speech', start_seconds: 0.3, end_seconds: 0.8 } }],
         },
         { id: 'second', source_id: 'e2e-source-01', name: '测试支撑', segment: { start_seconds: 0, end_seconds: 1.9 },
-          parameters: { mode: 'duration', sets: 1, reps: null, duration_seconds: 1, rest_seconds: 0 },
+          parameters: { mode: 'duration', sets: 1, reps: null, duration_seconds: 5, rest_seconds: 0 },
           evidence: [{ type: 'visual', start_seconds: 0, end_seconds: 1.9 }], needs_confirmation: false,
         },
       ],
@@ -92,7 +93,38 @@ for (const width of [320, 390, 768, 1440]) {
     await capture('paused')
     expect((await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()).violations).toEqual([])
     await page.getByRole('button', { name: '继续训练', exact: true }).click()
-    await page.getByRole('button', { name: '完成本组', exact: true }).click()
+    await expect(page.locator('.status-pill')).toHaveText('本组进行中')
+    await page.getByRole('button', { name: '放大', exact: true }).click()
+    const expandedVideo = page.getByRole('dialog', { name: '当前动作示范 · 放大观看' })
+    await expect(expandedVideo).toBeVisible()
+    await expect(expandedVideo).toContainText('本组进行中')
+    await expect(expandedVideo.getByRole('button', { name: '暂停视频', exact: true })).toBeVisible()
+    await expect(expandedVideo.getByRole('button', { name: '完成本组', exact: true })).toBeInViewport({ ratio: 1 })
+    await expect(expandedVideo.getByRole('button', { name: '暂停', exact: true })).toBeInViewport({ ratio: 1 })
+    await capture('expanded-video')
+    expect((await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()).violations).toEqual([])
+    if (width === 390) {
+      await page.setViewportSize({ width: 844, height: 390 })
+      await expect(expandedVideo.getByRole('button', { name: '完成本组', exact: true })).toBeInViewport({ ratio: 1 })
+      await expect(expandedVideo.getByRole('button', { name: '暂停', exact: true })).toBeInViewport({ ratio: 1 })
+      await capture('expanded-landscape')
+      await page.setViewportSize({ width, height: 844 })
+    }
+    await expandedVideo.getByRole('button', { name: '暂停', exact: true }).click()
+    await expect(expandedVideo).toContainText('训练已暂停')
+    await expandedVideo.getByRole('button', { name: '继续训练', exact: true }).click()
+    await expect(expandedVideo).toContainText('本组进行中')
+    await expandedVideo.getByRole('button', { name: '收起视频', exact: true }).click()
+    await expect(expandedVideo).toBeHidden()
+    await expect(page.locator('.status-pill')).toHaveText('本组进行中')
+    await expect(page.getByLabel('本次训练进度')).toContainText('已完成 0 / 3 组')
+    await expect(page.getByRole('button', { name: '暂停视频', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: '放大', exact: true }).click()
+    await expandedVideo.getByRole('button', { name: '完成本组', exact: true }).click()
+    await expect(expandedVideo).toContainText('本次已完成 1 / 3 组')
+    await expect(expandedVideo.getByRole('button', { name: '提前继续', exact: true })).toBeVisible()
+    await expect(expandedVideo.getByRole('button', { name: '提前继续', exact: true })).toBeFocused()
+    await expandedVideo.getByRole('button', { name: '收起视频', exact: true }).click()
     await expect(page.locator('.status-pill')).toHaveText('组间休息')
     await expect(page.getByLabel('接下来的安排')).toContainText('测试俯卧撑 · 第 2 / 2 组 · 3 次')
     await expect(page.getByLabel('本次训练进度')).toContainText('已完成 1 / 3 组')
@@ -105,14 +137,19 @@ for (const width of [320, 390, 768, 1440]) {
     await expect(page.getByRole('button', { name: '完成本组', exact: true })).toBeVisible({ timeout: 5_000 })
     await page.getByRole('button', { name: '完成本组', exact: true }).click()
     await expect(page.locator('.status-pill')).toHaveText('组间休息')
-    await expect(page.getByLabel('接下来的安排')).toContainText('测试支撑 · 第 1 / 1 组 · 1 秒')
+    await expect(page.getByLabel('接下来的安排')).toContainText('测试支撑 · 第 1 / 1 组 · 5 秒')
     await expect(page.getByText('接下来换动作。休息结束后，点“准备好了”再开始。')).toBeVisible()
     await capture('between-actions-rest')
     await expect(page.getByRole('button', { name: '准备好了', exact: true })).toBeVisible({ timeout: 7_000 })
     await expect(page.getByRole('heading', { name: '测试支撑', exact: true })).toBeVisible()
     await capture('next-action')
-    await page.getByRole('button', { name: '准备好了', exact: true }).click()
-    await expect(page.getByRole('heading', { name: '训练完成', exact: true })).toBeVisible({ timeout: 7_000 })
+    await page.getByRole('button', { name: '放大', exact: true }).click()
+    await expandedVideo.getByRole('button', { name: '准备好了', exact: true }).click()
+    await expect(expandedVideo).toContainText('倒计时进行中', { timeout: 5_000 })
+    const remaining = await expandedVideo.locator('.expanded-workout-status strong').innerText()
+    await expect(expandedVideo.locator('.expanded-workout-status strong')).not.toHaveText(remaining, { timeout: 3_000 })
+    await expect(page.getByRole('heading', { name: '训练完成', exact: true })).toBeVisible({ timeout: 8_000 })
+    await expect(expandedVideo).toBeHidden()
     await page.getByRole('link', { name: '查看训练结果' }).click()
     await expect(page).toHaveURL(/\/result\//)
     await expect(page.getByLabel('实际完成组数')).toHaveText('已完成 3 / 3 组')

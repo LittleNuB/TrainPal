@@ -50,7 +50,7 @@ export const validateLocalMediaUpload = (
   capabilities: AnalysisCapabilities,
 ): LocalMediaValidation => {
   if (!capabilities.local_upload_enabled) {
-    return { ok: false, code: 'disabled', message: '当前环境暂不支持本地视频分析' }
+    return { ok: false, code: 'disabled', message: '视频分析暂不可用，请稍后重试' }
   }
   if (!SUPPORTED_LOCAL_MEDIA_TYPES.includes(file.type as typeof SUPPORTED_LOCAL_MEDIA_TYPES[number])) {
     return {
@@ -60,16 +60,10 @@ export const validateLocalMediaUpload = (
     }
   }
   if (file.size > effectiveLocalUploadMaxBytes(capabilities)) {
-    const platformEnvelopeIsLimiting = (
-      effectiveLocalUploadMaxBytes(capabilities) === CLOUDBASE_DEMO_UPLOAD_MAX_BYTES
-      && capabilities.local_upload_max_bytes > CLOUDBASE_DEMO_UPLOAD_MAX_BYTES
-    )
     return {
       ok: false,
       code: 'too_large',
-      message: platformEnvelopeIsLimiting
-        ? 'CloudBase 演示入口限制 20 MB；请先压缩视频再上传'
-        : `当前环境支持不超过 ${formatSizeLimit(effectiveLocalUploadMaxBytes(capabilities))} 的视频`,
+      message: `视频过大，请压缩至 ${formatSizeLimit(effectiveLocalUploadMaxBytes(capabilities))} 以内再选择`,
     }
   }
   return { ok: true }
@@ -89,7 +83,7 @@ export const validateLocalMediaFile = (
     return {
       ok: false,
       code: 'too_long',
-      message: `当前环境支持最长 ${formatDurationLimit(capabilities.local_analysis_max_seconds)}的视频；长视频能力尚未完成验证`,
+      message: `视频过长，请截取 ${formatDurationLimit(capabilities.local_analysis_max_seconds)}以内的片段再选择`,
     }
   }
   return { ok: true }

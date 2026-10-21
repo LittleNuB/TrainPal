@@ -142,6 +142,54 @@ const setup = () => {
 }
 
 describe('TrainingEngine public command interface', () => {
+  it('completes only the confirmed paused set, preserves active time, and rejects duplicate confirmation', async () => {
+    const { engine, persistence, clock } = setup()
+    await engine.dispatch({ type: 'session.create', plan: plan(repsAction({ restSeconds: sourced(30, 'user') })), coachStyleId: null, flowVersion: 'watch-v1' })
+    await engine.dispatch({ type: 'set.start', sessionId: 'session-1', expectedRevision: 0 })
+    clock.advance(1_500)
+    await engine.dispatch({ type: 'session.pause', reason: 'user', sessionId: 'session-1', expectedRevision: persistence.current!.revision })
+    const confirmation = { type: 'set.complete', sessionId: 'session-1', expectedRevision: persistence.current!.revision,
+      pausedSet: { itemId: 'curl', setIndex: 0 } } as const
+    expect((await engine.dispatch({ ...confirmation, pausedSet: { itemId: 'curl', setIndex: 1 } })).ok).toBe(false)
+    clock.advance(5_000)
+    const result = expectSuccess(await engine.dispatch(confirmation))
+    expect(result.session).toMatchObject({ status: 'resting', currentSetIndex: 1 })
+    expect(result.session?.progress[0]).toMatchObject({ completedSets: 1, activeMilliseconds: 1_500 })
+    expect((await engine.dispatch(confirmation)).ok).toBe(false)
+    expect(persistence.current?.progress[0]?.completedSets).toBe(1)
+  })
+
+  it.each(['before_start', 'countdown', 'rest', 'hidden', 'duration'] as const)('rejects paused completion for %s', async state => {
+    const { engine, persistence } = setup()
+    await engine.dispatch({ type: 'session.create', plan: plan(state === 'duration' ? durationAction() : repsAction({ restSeconds: sourced(30, 'user') })), coachStyleId: null, flowVersion: 'watch-v1' })
+    const dispatch = (type: 'set.start' | 'set.prepare' | 'set.complete' | 'session.pause') => engine.dispatch({ type,
+      sessionId: 'session-1', expectedRevision: persistence.current!.revision, reason: state === 'hidden' ? 'page_hidden' : 'user' })
+    if (state === 'countdown') await dispatch('set.prepare')
+    else if (state !== 'before_start') await dispatch('set.start')
+    if (state === 'rest') await dispatch('set.complete')
+    if (state !== 'before_start') await dispatch('session.pause')
+    const before = structuredClone(persistence.current)
+    const result = await engine.dispatch({ type: 'set.complete', sessionId: 'session-1', expectedRevision: before!.revision,
+      pausedSet: { itemId: before!.plan.items[0]!.id, setIndex: before!.currentSetIndex } })
+    expect(result.ok).toBe(false)
+    expect(persistence.current).toEqual(before)
+  })
+
+  it('saves the final confirmed set once without starting another set', async () => {
+    const { engine, persistence, clock } = setup()
+    await engine.dispatch({ type: 'session.create', plan: plan(repsAction({ sets: sourced(1, 'user') })), coachStyleId: null, flowVersion: 'watch-v1' })
+    await engine.dispatch({ type: 'set.start', sessionId: 'session-1', expectedRevision: 0 })
+    clock.advance(1_000)
+    await engine.dispatch({ type: 'session.pause', reason: 'user', sessionId: 'session-1', expectedRevision: persistence.current!.revision })
+    const confirmation = { type: 'set.complete', sessionId: 'session-1', expectedRevision: persistence.current!.revision,
+      pausedSet: { itemId: 'curl', setIndex: 0 } } as const
+    const result = expectSuccess(await engine.dispatch(confirmation))
+    expect(result.session).toBeNull()
+    expect(result.record?.outcome).toBe('completed')
+    expect(result.record?.activeSeconds).toBe(1)
+    await engine.dispatch(confirmation)
+    expect(persistence.records.size).toBe(1)
+  })
   it('does not auto-advance when a watch-flow rest tick arrives long after its deadline', async () => {
     const { engine, clock, persistence } = setup()
     await engine.dispatch({ type: 'session.create', plan: plan(repsAction({ restSeconds: sourced(2, 'user') })), coachStyleId: null, flowVersion: 'watch-v1' })

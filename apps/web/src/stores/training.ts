@@ -15,6 +15,7 @@ import type {
   TrainingEngine,
   TrainingEngineErrorCode,
   TrainingEngineResult,
+  TrainingSetConfirmation,
 } from '@/training/training-engine'
 
 const cloneJson = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -211,10 +212,11 @@ export const useTrainingStore = defineStore('training', () => {
       sessionId: current.sessionId, expectedRevision: current.revision }))
   })
 
-  const completeSet = () => runVersioned((current) => ({
+  const completeSet = (confirmation?: TrainingSetConfirmation) => runVersioned((current) => ({
     type: 'set.complete',
-    sessionId: current.sessionId,
-    expectedRevision: current.revision,
+    sessionId: confirmation?.sessionId ?? current.sessionId,
+    expectedRevision: confirmation?.expectedRevision ?? current.revision,
+    ...(confirmation ? { pausedSet: { itemId: confirmation.itemId, setIndex: confirmation.setIndex } } : {}),
   }))
 
   const continueRest = () => runVersioned((current) => ({

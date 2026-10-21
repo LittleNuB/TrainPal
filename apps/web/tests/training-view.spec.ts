@@ -7,6 +7,7 @@ import type { SourceSummary } from '@/domain/types'
 import type { CoachStyleId } from '@/domain/coach'
 import type { TrainingRecord, TrainingSession } from '@/domain/training'
 import CoachMotion from '@/features/experience/CoachMotion.vue'
+import PlaybackControls from '@/features/experience/PlaybackControls.vue'
 import { createQuickExperienceDraftItems } from '@/features/quick-experience/fixture'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useLocalMediaStore } from '@/stores/local-media'
@@ -183,6 +184,115 @@ const mountTraining = async (pinia: ReturnType<typeof createPinia>) => {
 }
 
 describe('训练页合同', () => {
+  it('keeps the expanded player mounted when the next action uses the same local video', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const current = trainingSession('active')
+    for (const action of current.plan.items) {
+      action.sourceRef = { kind: 'local', sourceId: 'local:shared', title: '本地视频' }
+      action.segment = { value: { start_seconds: 0, end_seconds: 10 }, source: 'video' }
+    }
+    const training = useTrainingStore()
+    const engine = new SessionEngine(current)
+    await training.load(engine)
+    vi.spyOn(useLocalMediaStore(), 'urlFor').mockReturnValue('blob:shared')
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)
+    const wrapper = await mountTraining(pinia)
+    const assistant = wrapper.getComponent(PlaybackControls)
+    const assistantElement = assistant.element
+    await wrapper.get('.expand-video').trigger('click')
+    await flushPromises()
+    const dialog = document.querySelector('[role="dialog"]')!
+    const media = dialog.querySelector('video')
+    expect(dialog.querySelector('[aria-label="TrainPal 语音助手"]')).toBe(assistantElement)
+    expect(engine.commands).toHaveLength(0)
+    training.session = { ...current, currentItemIndex: 1, status: 'paused' }
+    await flushPromises()
+    expect(document.querySelector('[role="dialog"]')).toBe(dialog)
+    expect(dialog.querySelector('video')).toBe(media)
+    expect(dialog.textContent).toContain(current.plan.items[1]!.name)
+    dialog.querySelector<HTMLButtonElement>('[data-dialog-initial-focus]')!.click()
+    await flushPromises()
+    expect(wrapper.get('.training-dock [aria-label="TrainPal 语音助手"]').element).toBe(assistantElement)
+    wrapper.unmount()
+  })
+
+  it('keeps pending and failed training controls reachable in the expanded view', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    let current = trainingSession('paused')
+    current.plan.items[0]!.mode = 'reps'
+    current.plan.items[0]!.reps = { value: 3, source: 'user' }
+    current.plan.items[0]!.sourceRef = { sourceId: source.id }
+    current.plan.items[0]!.segment = { value: { start_seconds: 5, end_seconds: 12 }, source: 'video' }
+    useAnalysisStore().sources = [source]
+    let resolve!: () => void
+    const waiting = new Promise<void>(done => { resolve = done })
+    const engine: TrainingEngine = {
+      restore: async () => ({ ok: true, session: current, record: null, events: [] }),
+      dispatch: async command => {
+        if (command.type === 'set.start') {
+          await waiting
+          current = { ...current, status: 'active', revision: 2 }
+          return { ok: true, session: current, record: null, events: [] }
+        }
+        return { ok: false, code: 'session_conflict', message: '请恢复最新进度', session: current }
+      },
+    }
+    await useTrainingStore().load(engine)
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)
+    const wrapper = await mountTraining(pinia)
+    await wrapper.get('.primary-action').trigger('click')
+    await wrapper.get('.expand-video').trigger('click')
+    await flushPromises()
+    const dialog = document.querySelector('[role="dialog"]')!
+    expect(dialog).not.toBeNull()
+    expect(dialog.querySelector<HTMLButtonElement>('.primary-action')!.disabled).toBe(true)
+    resolve()
+    await flushPromises()
+    expect(dialog.textContent).toContain('完成本组')
+    expect(dialog.querySelector<HTMLButtonElement>('.primary-action')!.disabled).toBe(false)
+    const pauseButton = dialog.querySelector<HTMLButtonElement>('.pause-training')!
+    pauseButton.focus()
+    pauseButton.click()
+    await flushPromises()
+    expect(useTrainingStore().commandLocked).toBe(true)
+    expect(dialog.textContent).toContain('此页面已暂停')
+    expect(dialog.textContent).toContain('重新加载最新进度')
+    expect(dialog.querySelector<HTMLButtonElement>('.primary-action')!.disabled).toBe(true)
+    expect(document.activeElement?.textContent).toContain('收起视频')
+    wrapper.unmount()
+  })
+  it('keeps a manually paused demonstration stopped while training ticks without completing a set', async () => {
+    vi.useFakeTimers()
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const current = trainingSession('active')
+    current.flowVersion = 'watch-v1'
+    current.plan.items[0]!.sourceRef = { sourceId: source.id }
+    current.plan.items[0]!.segment = { value: { start_seconds: 5, end_seconds: 12 }, source: 'video' }
+    useAnalysisStore().sources = [source]
+    const engine = new SessionEngine(current)
+    await useTrainingStore().load(engine)
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)
+    const wrapper = await mountTraining(pinia)
+    const media = wrapper.get<HTMLVideoElement>('video')
+    Object.defineProperty(media.element, 'paused', { configurable: true, value: false })
+    await media.trigger('play')
+    await wrapper.get('[aria-label="暂停视频"]').trigger('click')
+    play.mockClear()
+    await vi.advanceTimersByTimeAsync(1100)
+    await media.trigger('loadedmetadata')
+    await flushPromises()
+    expect(play).not.toHaveBeenCalled()
+    expect(useTrainingStore().session?.status).toBe('active')
+    expect(engine.commands.some(command => command.type === 'set.complete')).toBe(false)
+    expect(useTrainingStore().currentProgress?.completedSets).toBe(0)
+    wrapper.unmount()
+  })
   it('keeps training controls available while reference video playback is pending', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

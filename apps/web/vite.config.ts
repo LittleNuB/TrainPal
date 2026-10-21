@@ -21,5 +21,6 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     include: ['./tests/*.spec.ts'],
     restoreMocks: true,
+    maxWorkers: 2,
   },
 })

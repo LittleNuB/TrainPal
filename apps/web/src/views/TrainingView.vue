@@ -17,13 +17,15 @@ import CoachMotion from '@/features/experience/CoachMotion.vue'
 import SourceTips from '@/features/experience/SourceTips.vue'
 import { useTrainingReminders } from '@/features/experience/use-training-reminders'
 import PlaybackControls from '@/features/experience/PlaybackControls.vue'
+import VideoPlayer from '@/features/experience/VideoPlayer.vue'
+import TrainingActions from '@/features/experience/TrainingActions.vue'
 import { currentPlaybackRange } from '@/domain/playback'
 import { derivePetState } from '@/features/experience/pet-state'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useLibraryStore } from '@/stores/library'
 import { useLocalMediaStore } from '@/stores/local-media'
 import { useTrainingStore } from '@/stores/training'
-import type { TrainingEngineResult } from '@/training/training-engine'
+import type { TrainingEngineResult, TrainingSetConfirmation } from '@/training/training-engine'
 
 const analysis = useAnalysisStore()
 const library = useLibraryStore()
@@ -40,6 +42,9 @@ const screenReaderAnnouncement = ref('')
 const coachCue = ref<CoachMotionCue | null>(null)
 const soundEnabled = ref(true)
 const playbackBusy = ref(false)
+const demonstrationPaused = ref(false)
+const demonstrationExpanded = ref(false)
+const expandedVoiceTarget = ref<HTMLElement | null>(null)
 const handsfreeEnabled = ref(false)
 const reminderPreferenceError = ref('')
 let cueAudio: AudioContext | null = null
@@ -235,7 +240,7 @@ const syncVideo = async (): Promise<void> => {
   if (!element || !range) return
   if (document.hidden || leavePause) { element.pause(); return }
   if (playbackBusy.value) return
-  const looping = session.value?.flowVersion === 'watch-v1' && session.value.status === 'active'
+  const looping = session.value?.flowVersion === 'watch-v1' && session.value.status === 'active' && !demonstrationPaused.value
   if (looping && (element.ended || element.currentTime >= range.end_seconds)) {
     element.currentTime = range.start_seconds
   } else if (element.ended) {
@@ -252,6 +257,7 @@ const syncVideo = async (): Promise<void> => {
   }
   if (
     session.value?.status === 'active'
+    && !demonstrationPaused.value
     && !training.commandLocked
     && element.currentTime < range.end_seconds
   ) {
@@ -268,7 +274,7 @@ const keepVideoInSegment = (): void => {
   if (document.hidden || leavePause) { element.pause(); return }
   if (playbackBusy.value) return
   if (element.currentTime >= range.end_seconds) {
-    if (session.value?.flowVersion === 'watch-v1' && session.value.status === 'active' && !training.commandLocked) {
+    if (session.value?.flowVersion === 'watch-v1' && session.value.status === 'active' && !training.commandLocked && !demonstrationPaused.value) {
       element.currentTime = range.start_seconds
       void element.play().catch(() => undefined)
       return
@@ -279,7 +285,7 @@ const keepVideoInSegment = (): void => {
   }
   if (element.currentTime < range.start_seconds) {
     element.currentTime = range.start_seconds
-    if (session.value?.status === 'active') void element.play().catch(() => undefined)
+    if (session.value?.status === 'active' && !demonstrationPaused.value) void element.play().catch(() => undefined)
   }
 }
 
@@ -287,7 +293,7 @@ const finishVideoSegment = (): void => {
   const element = video.value
   if (!element) return
   if (document.hidden || leavePause) { element.pause(); return }
-  if (session.value?.flowVersion === 'watch-v1' && session.value.status === 'active' && segment.value && !training.commandLocked) {
+  if (session.value?.flowVersion === 'watch-v1' && session.value.status === 'active' && segment.value && !training.commandLocked && !demonstrationPaused.value) {
     element.currentTime = segment.value.start_seconds
     void element.play().catch(() => undefined)
   } else element.pause()
@@ -357,7 +363,7 @@ const toggleSound = (): void => {
 
 const resolveCurrentMedia = async (): Promise<void> => {
   const sourceId = item.value?.sourceRef?.sourceId
-  localMediaUrl.value = null
+  localMediaUrl.value = sourceId && isLocalSource.value ? localMedia.urlFor(sourceId) : null
   localMediaError.value = ''
   localMediaResolving.value = false
   if (!sourceId) return
@@ -367,6 +373,7 @@ const resolveCurrentMedia = async (): Promise<void> => {
     }
     return
   }
+  if (localMediaUrl.value) return
   localMediaResolving.value = true
   try {
     const resolved = await localMedia.resolve(sourceId)
@@ -418,7 +425,10 @@ const reselectCurrentLocalMedia = async (event: Event): Promise<void> => {
 
 watch(
   () => [session.value?.status, item.value?.id, training.commandLocked],
-  () => { void syncVideo() },
+  ([status], [previousStatus]) => {
+    if (status === 'active' && previousStatus !== 'active') demonstrationPaused.value = false
+    void syncVideo()
+  },
 )
 
 watch(
@@ -445,6 +455,7 @@ const run = async (
 }
 
 const startOrContinue = (): Promise<TrainingEngineResult | null> => run(() => {
+  demonstrationPaused.value = false
   unlockSound()
   if ((session.value?.pausedRestSeconds ?? 0) > 0) return training.startSet()
   if (session.value?.status === 'ready_to_continue' || session.value?.status === 'resting') {
@@ -471,9 +482,9 @@ const closeAutomaticReminders = async (): Promise<void> => {
     reminderPreferenceError.value = '本次提醒已关闭，但设置没能保存。重试保存，避免下次重新开启。'
   }
 }
-const completeSet = (): Promise<TrainingEngineResult | null> => {
+const completeSet = (confirmation?: TrainingSetConfirmation): Promise<TrainingEngineResult | null> => {
   reminders.cancel()
-  return run(() => training.completeSet())
+  return run(() => training.completeSet(confirmation))
 }
 const continueEarly = (): Promise<TrainingEngineResult | null> => run(() => training.continueRest())
 const reloadAfterConflict = (): Promise<TrainingEngineResult | null> => run(() => training.restore())
@@ -626,19 +637,48 @@ onBeforeUnmount(() => {
 
       <div class="session-layout">
         <section class="media-stage" :class="{ 'no-video': !item.sourceRef }" aria-label="当前动作参考视频">
-          <video
+          <div class="stage-heading"><span>{{ mediaBadge }}</span><span v-if="hasPlayableVideo">第 {{ setNumber }} / {{ targetSets }} 组</span></div>
+          <VideoPlayer
             v-if="hasPlayableVideo"
-            ref="video"
-            :src="mediaUrl ?? undefined"
-            playsinline
-            controls
+            @update:element="video = $event"
+            :src="mediaUrl!"
+            label="当前动作示范"
+            training
+            :range="playbackBusy ? null : segment"
             :muted="!soundEnabled"
-            preload="metadata"
+            @user-playback="demonstrationPaused = !$event"
+            @expanded="demonstrationExpanded = $event"
+            @layout-change="syncVideo"
             @loadedmetadata="syncVideo"
             @timeupdate="keepVideoInSegment"
             @ended="finishVideoSegment"
             @error="mediaLoadFailed = true"
-          />
+          >
+            <template #expanded-title>{{ item.name }} · 第 {{ setNumber }} / {{ targetSets }} 组</template>
+            <template #expanded-controls>
+              <div class="expanded-workout-controls" :aria-busy="commandPending || playbackBusy">
+                <div class="expanded-workout-actions">
+                  <div class="expanded-workout-status" aria-live="polite">
+                    <span>{{ statusLabel }}<small>本次已完成 {{ completedSets }} / {{ totalSets }} 组</small></span>
+                    <strong v-if="session.status === 'resting' || isPausedRest">{{ formatDuration(restRemainingSeconds) }}</strong>
+                    <strong v-else-if="session.status === 'countdown'">{{ countdownSeconds }}</strong>
+                    <strong v-else-if="item.mode === 'duration'">{{ formatDuration(durationRemainingSeconds) }}</strong>
+                    <strong v-else>{{ item.reps.value }} 次</strong>
+                  </div>
+                  <TrainingActions
+                    :status="session.status" :mode="item.mode" :start-label="startActionLabel"
+                    :disabled="commandPending || training.commandLocked || playbackBusy" expanded
+                    @pause="pause" @start="startOrContinue" @continue="continueEarly" @complete="completeSet"
+                  />
+                  <p v-if="training.errorMessage" class="expanded-workout-error" role="alert">
+                    {{ training.errorMessage }}
+                    <button v-if="training.commandLocked" type="button" :disabled="commandPending" @click="reloadAfterConflict">重新加载最新进度</button>
+                  </p>
+                </div>
+                <div ref="expandedVoiceTarget" class="expanded-voice" />
+              </div>
+            </template>
+          </VideoPlayer>
           <div
             v-else-if="item.sourceRef && (analysis.sourcesLoading || localMediaResolving)"
             class="media-placeholder"
@@ -669,7 +709,6 @@ onBeforeUnmount(() => {
           >
             {{ localMedia.storageMessage }}
           </small>
-          <div class="stage-badge">{{ mediaBadge }}</div>
         </section>
 
         <section class="training-console" :class="{ 'training-console--rest': isRestFocus }">
@@ -698,53 +737,14 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="training-dock">
-            <PlaybackControls :video="video" :state="petState" :cue="coachCue" @busy="playbackBusy = $event" @handsfree="handsfreeEnabled = $event" @resume="startOrContinue" />
-            <div v-if="!playbackBusy" class="training-controls">
-              <button
-                v-if="session.status === 'countdown'"
-                type="button" class="primary-action" :disabled="commandPending || training.commandLocked" @click="pause"
-              >
-                先暂停
-              </button>
-              <button
-                v-else-if="session.status === 'paused' || session.status === 'ready_to_continue'"
-                type="button"
-                class="primary-action"
-                :disabled="commandPending || training.commandLocked || playbackBusy"
-                @click="startOrContinue"
-              >
-                {{ startActionLabel }}
-              </button>
-              <button
-                v-else-if="session.status === 'resting'"
-                type="button"
-                class="primary-action rest-action"
-                :disabled="commandPending || training.commandLocked"
-                @click="continueEarly"
-              >
-                提前继续
-              </button>
-              <button
-                v-else-if="item.mode === 'reps'"
-                type="button"
-                class="primary-action"
-                :disabled="commandPending || training.commandLocked"
-                @click="completeSet"
-              >
-                完成本组
-              </button>
-              <p v-else class="active-duration-note" role="status">本组计时结束后自动完成</p>
-
-              <button
-                v-if="session.status === 'active' || session.status === 'resting'"
-                type="button"
-                class="pause-training"
-                :disabled="commandPending || training.commandLocked"
-                @click="pause"
-              >
-                暂停
-              </button>
-            </div>
+            <Teleport :to="expandedVoiceTarget ?? 'body'" :disabled="!demonstrationExpanded || !expandedVoiceTarget">
+              <PlaybackControls :video="video" :state="petState" :cue="coachCue" :immersive="demonstrationExpanded" :complete-set="completeSet" @busy="playbackBusy = $event" @handsfree="handsfreeEnabled = $event" @resume="startOrContinue" />
+            </Teleport>
+            <TrainingActions
+              v-if="!playbackBusy" :status="session.status" :mode="item.mode" :start-label="startActionLabel"
+              :disabled="commandPending || training.commandLocked"
+              @pause="pause" @start="startOrContinue" @continue="continueEarly" @complete="completeSet"
+            />
           </div>
 
           <div v-if="!isRestFocus" class="coach-strip">
@@ -842,18 +842,18 @@ onBeforeUnmount(() => {
 .session-progress progress::-webkit-progress-value { background: var(--tp-secondary); }
 .session-progress progress::-moz-progress-bar { background: var(--tp-secondary); }
 .session-layout { display: grid; gap: 14px; }
-.media-stage { position: relative; overflow: hidden; height: clamp(218px, 41dvh, 460px); border: 1px solid var(--tp-line); border-radius: 14px; background: var(--tp-media-canvas); box-shadow: var(--tp-shadow-soft); }
-.media-stage:has(.media-placeholder) { height: 180px; }
-.media-stage video { width: 100%; height: 100%; object-fit: contain; }
+.media-stage { min-width: 0; align-self: start; border: 1px solid var(--tp-line); border-radius: 14px; background: var(--tp-surface); box-shadow: var(--tp-shadow-soft); }
+.stage-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding: 12px 14px; color: var(--tp-muted); font-size: 12px; }
+.stage-heading span:last-child { color: var(--tp-ink); font-weight: 650; }
+.media-stage:has(.media-placeholder) .media-placeholder { min-height: 180px; }
 .media-placeholder { display: grid; height: 100%; place-content: center; gap: 8px; padding: 20px; color: var(--tp-muted); background: var(--tp-surface-raised); text-align: center; }
 .media-placeholder strong { color: var(--tp-training-ink); font-size: 18px; }
 .media-placeholder small { font-size: 11px; }
 .reselect-local-media { position: relative; display: inline-grid; min-height: 44px; margin-top: 6px; place-items: center; overflow: hidden; border: 1px solid var(--tp-line); border-radius: 12px; color: var(--tp-secondary); font-size: 11px; font-weight: 800; cursor: pointer; }
 .reselect-local-media:focus-within { outline: 2px solid var(--tp-focus); outline-offset: 3px; }
 .reselect-local-media input { position: absolute; width: 1px; height: 1px; opacity: 0; }
-.local-storage-message { position: absolute; right: 12px; bottom: 12px; left: 12px; z-index: 2; padding: 8px 10px; border-radius: 10px; color: #FFFFFF; background: rgb(14 19 17 / 86%); line-height: 1.5; text-align: center; }
+.local-storage-message { display: block; padding: 8px 12px; color: var(--tp-muted); line-height: 1.5; }
 .no-video-mark { color: var(--tp-primary-readable); font: 700 12px/1 var(--font-display); letter-spacing: .16em; }
-.stage-badge { position: absolute; top: 12px; left: 12px; padding: 7px 10px; border: 1px solid var(--tp-line); border-radius: 12px; color: #FFFFFF; background: rgb(14 19 17 / 82%); font-size: 11px; backdrop-filter: blur(10px); }
 .training-console { position: relative; padding: 16px; border: 1px solid var(--tp-line); border-radius: 14px; background: var(--tp-training-surface); box-shadow: none; }
 .coach-strip { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; margin-top: 16px; padding: 10px 12px; border-radius: 18px; background: rgb(25 205 192 / 9%); }
 .coach-strip :deep(.trainpal-coach__image) { width: clamp(58px, 18vw, 78px); }
@@ -875,15 +875,7 @@ onBeforeUnmount(() => {
 .upcoming-set span { color: var(--tp-muted); font-size: 11px; }
 .upcoming-set p { margin: 5px 0 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .playback-note { margin: 8px 0 0; color: var(--tp-muted); font-size: 11px; line-height: 1.6; }
-.primary-action,
 .primary-link { display: grid; width: 100%; min-height: 52px; place-items: center; border: 1px solid var(--tp-primary); border-radius: 12px; color: var(--tp-on-primary); background: var(--tp-primary); box-shadow: var(--tp-shadow-soft); font-weight: 800; text-decoration: none; }
-.rest-action { border-color: var(--tp-secondary); color: var(--tp-training-canvas); background: var(--tp-secondary); box-shadow: 0 12px 28px rgb(25 205 192 / 20%); }
-.primary-action:disabled { opacity: .5; }
-.training-controls { display: grid; gap: 8px; }
-.training-controls:has(.pause-training) { grid-template-columns: minmax(0, 1fr) auto; }
-.pause-training { min-width: 80px; min-height: 52px; padding: 0 16px; border: 1px solid var(--tp-secondary); border-radius: 12px; color: var(--tp-training-ink); background: transparent; font-weight: 700; }
-.pause-training:disabled { opacity: .5; }
-.active-duration-note { align-self: center; margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.6; }
 .more-actions { margin-top: 6px; }
  .more-actions summary { display: flex; min-height: 44px; align-items: center; justify-content: center; color: var(--tp-muted); font-size: 11px; font-weight: 700; cursor: pointer; list-style: none; }
 .more-actions summary::-webkit-details-marker { display: none; }
@@ -907,14 +899,12 @@ onBeforeUnmount(() => {
 
 @media (max-width: 799px) {
   .training-page { padding-bottom: calc(220px + env(safe-area-inset-bottom)); }
-  .media-stage { height: clamp(180px, 32dvh, 300px); }
   .training-dock { position: fixed; right: 0; bottom: 0; left: 0; z-index: 20; padding: 12px max(16px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); border-top: 1px solid var(--tp-line); background: var(--tp-training-canvas); }
 }
 
 @media (min-width: 800px) {
   .session-title { max-width: none; }
   .session-layout { grid-template-columns: minmax(0, 1.35fr) minmax(310px, .65fr); align-items: stretch; gap: 22px; }
-  .media-stage { height: min(62dvh, 620px); }
   .training-console { display: flex; min-height: 480px; flex-direction: column; justify-content: center; padding: 24px; }
   .more-actions { margin-top: 12px; }
 }
@@ -923,7 +913,6 @@ onBeforeUnmount(() => {
 .training-console { background: var(--tp-surface); }
 .status-readout span, .status-readout small, .rest-focus__copy p, .coach-strip p { font-size: 14px; }
 .status-readout strong { margin: 14px 0; }
-.rest-action { color: var(--tp-on-primary); border-color: var(--tp-primary); background: var(--tp-primary); box-shadow: none; }
 .coach-strip { border-radius: 0; padding: 10px 0; background: transparent; }
 .coach-strip :deep(.coach-motion__image) { width: 58px; max-height: 68px; }
 .training-pet--rest :deep(.coach-motion__image) { width: 96px; max-height: 110px; }
@@ -934,9 +923,26 @@ onBeforeUnmount(() => {
   .training-header { margin-bottom: 8px; }
   .session-title { margin-bottom: 10px; }
   .session-progress { margin-bottom: 12px; }
-  .media-stage { height: clamp(160px, 28dvh, 280px); }
-  .training-console { border: 0; padding: 12px 4px; background: transparent; }
+  .training-console { display: contents; }
+  .status-readout { grid-row: 1; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; justify-items: start; gap: 2px 12px; margin: 0; }
+  .status-readout strong { grid-column: 2; grid-row: 1 / 3; margin: 0; font-size: 38px; }
+  .status-readout small { grid-row: 2; font-size: 12px; }
+  .rest-focus { grid-row: 1; padding: 8px 0; }
+  .media-stage { grid-row: 2; }
   .training-dock { background: var(--tp-surface); }
 }
+@media (max-width: 799px) and (max-height: 560px) {
+  .training-dock { position: static; }
+}
 
+.expanded-workout-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: white; font-size: 13px; }
+.expanded-workout-status small { display: block; margin-top: 4px; color: #bed0de; font-size: 11px; }
+.expanded-workout-status strong { font-size: 28px; font-variant-numeric: tabular-nums; }
+.expanded-workout-error { margin: 10px 0 0; color: #ffbdb0; font-size: 12px; }
+.expanded-workout-error button { min-height: 44px; color: white; background: transparent; border: 1px solid #9bb4c8; border-radius: 8px; }
+.expanded-workout-controls { display: grid; gap: 4px; }
+.expanded-workout-actions, .expanded-voice { min-width: 0; }
+@media (min-width: 680px) and (max-height: 500px), (min-width: 1024px) {
+  .expanded-workout-controls { grid-template-columns: minmax(0, 1fr) minmax(260px, .8fr); align-items: end; gap: 24px; }
+}
 </style>
